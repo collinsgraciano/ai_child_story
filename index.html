@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>儿童故事图片视频生成工具</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- 顶部标题栏 -->
+        <header class="header">
+            <h1 class="title" id="storyTitle">儿童故事图片视频生成工具</h1>
+            <p class="subtitle" id="storySubtitle">加载中...</p>
+            <button class="settings-btn" onclick="toggleSettings()" title="设置">⚙️</button>
+        </header>
+
+        <!-- 设置面板 (伸缩展开) -->
+        <div id="settingsPanel" class="settings-panel">
+            <div class="settings-grid">
+                <!-- 图片 API 设置 -->
+                <div class="settings-column">
+                    <h3>🖼️ 图片生成 API</h3>
+                    <div class="form-group">
+                        <label for="imageApiUrl">API 地址</label>
+                        <input type="text" id="imageApiUrl" placeholder="http://example.com/v1">
+                    </div>
+                    <div class="form-group">
+                        <label for="imageApiKey">API 密钥</label>
+                        <input type="password" id="imageApiKey" placeholder="sk-xxx">
+                    </div>
+                    <div class="form-group">
+                        <label for="imageModel">模型名称</label>
+                        <input type="text" id="imageModel" placeholder="g3-img-pro">
+                    </div>
+                </div>
+
+                <!-- 视频 API 设置 -->
+                <div class="settings-column">
+                    <h3>🎬 视频生成 API</h3>
+                    <div class="form-group">
+                        <label for="videoApiUrl">API 地址</label>
+                        <input type="text" id="videoApiUrl" placeholder="http://example.com/v1">
+                    </div>
+                    <div class="form-group">
+                        <label for="videoApiKey">API 密钥</label>
+                        <input type="password" id="videoApiKey" placeholder="sk-xxx">
+                    </div>
+                    <div class="form-group">
+                        <label for="videoModel">模型名称</label>
+                        <input type="text" id="videoModel" placeholder="sora">
+                    </div>
+                </div>
+
+                <!-- 生成配置 -->
+                <div class="settings-column">
+                    <h3>⚙️ 生成配置</h3>
+                    <div class="form-group">
+                        <label for="batchSize">每次生成数量</label>
+                        <input type="number" id="batchSize" min="1" max="5" value="1" placeholder="默认: 1">
+                        <small
+                            style="color: var(--text-secondary); display: block; margin-top: 4px;">多张图将保存为变体，前端默认显示第一张。</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="concurrencyImage">图片并发数</label>
+                        <input type="number" id="concurrencyImage" min="1" max="5" value="2" placeholder="默认: 2">
+                        <small
+                            style="color: var(--text-secondary); display: block; margin-top: 4px;">同时生成的图片任务数量。</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="concurrencyVideo">视频并发数</label>
+                        <input type="number" id="concurrencyVideo" min="1" max="5" value="1" placeholder="默认: 1">
+                        <small
+                            style="color: var(--text-secondary); display: block; margin-top: 4px;">同时生成的视频任务数量。</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-actions">
+                <button class="btn btn-primary" onclick="saveSettings()">
+                    <span class="btn-icon">💾</span> 保存设置
+                </button>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- JSON 输入区域 -->
+            <section class="json-input-section">
+                <div class="section-header">
+                    <h2 class="section-title">📄 故事数据</h2>
+                    <div class="section-actions">
+                        <!-- 项目选择器 -->
+                        <select id="projectSelector" class="project-selector" onchange="switchProject(this.value)">
+                            <option value="">-- 选择项目 --</option>
+                        </select>
+                        <button class="btn btn-danger btn-icon-only" onclick="deleteCurrentProject()" title="删除当前项目"
+                            id="deleteProjectBtn">
+                            🗑️
+                        </button>
+                        <button class="btn btn-primary" onclick="loadJsonInput()" id="loadJsonBtn">
+                            <span class="btn-icon">📥</span> 加载 JSON
+                        </button>
+                        <button class="btn btn-secondary" onclick="toggleJsonInput()">
+                            <span class="btn-icon">📝</span> <span id="toggleJsonText">展开输入</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="json-input-wrapper" id="jsonInputWrapper" style="display: none;">
+                    <textarea id="jsonInput"
+                        placeholder="粘贴故事 JSON 数据到这里...&#10;&#10;必须包含以下字段：&#10;- title: 故事标题&#10;- script: 分镜数组，每项包含 page_index 和 image_prompt"></textarea>
+                    <div class="json-input-info">
+                        <span id="jsonStatus">等待输入</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 设计稿区域 -->
+            <section class="design-sheets">
+                <h2 class="section-title">📋 设计稿</h2>
+                <p class="section-desc">首先生成角色和场景设计稿，作为后续所有分镜的参考</p>
+
+                <div class="sheets-grid">
+                    <!-- 角色设计稿 -->
+                    <div class="sheet-card" id="characterSheet">
+                        <div class="sheet-header">
+                            <h3>👤 角色设计稿</h3>
+                            <span class="status-badge" id="characterStatus">未生成</span>
+                        </div>
+                        <div class="sheet-preview" id="characterPreview">
+                            <div class="placeholder">
+                                <span class="icon">🎨</span>
+                                <p>点击下方按钮生成</p>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="generateCharacterSheet()">
+                            <span class="btn-icon">✨</span> 生成角色设计稿
+                        </button>
+                    </div>
+
+                    <!-- 场景设计稿 -->
+                    <div class="sheet-card" id="sceneSheet">
+                        <div class="sheet-header">
+                            <h3>🏞️ 场景设计稿</h3>
+                            <span class="status-badge" id="sceneStatus">未生成</span>
+                        </div>
+                        <div class="sheet-preview" id="scenePreview">
+                            <div class="placeholder">
+                                <span class="icon">🖼️</span>
+                                <p>点击下方按钮生成</p>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="generateSceneSheet()">
+                            <span class="btn-icon">✨</span> 生成场景设计稿
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 分镜区域 -->
+            <section class="storyboard">
+                <div class="section-header">
+                    <h2 class="section-title">🎬 分镜画面</h2>
+                    <div class="section-actions">
+                        <button class="btn btn-primary" onclick="generateAllImages()" id="generateAllBtn">
+                            <span class="btn-icon">🚀</span> <span id="generateAllText">一键生成所有</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="generateAllImages()">
+                            <span class="btn-icon">📦</span> 批量生成分镜
+                        </button>
+                        <button class="btn btn-secondary" onclick="generateAllVideos()">
+                            <span class="btn-icon">🎥</span> 批量生成视频
+                        </button>
+                    </div>
+                </div>
+
+                <div class="section-actions" style="margin-bottom: 20px; justify-content: flex-end;">
+                    <button class="btn btn-primary" onclick="generateAllImagesAndVideos()" style="width: auto;">
+                        <span class="btn-icon">🚀</span> 全流程生成 (图+视)
+                    </button>
+                </div>
+    </div>
+
+    <div class="pages-grid" id="pagesGrid">
+        <!-- 页面卡片将由 JS 动态生成 -->
+        <div class="loading-placeholder">
+            <div class="spinner"></div>
+            <p>加载故事数据中...</p>
+        </div>
+    </div>
+    </section>
+    </main>
+
+    <!-- 底部状态栏 -->
+    <footer class="footer">
+        <div class="progress-info">
+            <span id="progressText">就绪</span>
+        </div>
+    </footer>
+
+
+
+    <!-- 图片预览模态框 -->
+    <div class="modal" id="imageModal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeModal()">&times;</span>
+            <img id="modalImage" src="" alt="预览">
+            <div class="modal-actions">
+                <button class="btn btn-danger" onclick="regenerateCurrentImage()">
+                    <span class="btn-icon">🔄</span> 重新生成
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 视频预览模态框 -->
+    <div class="modal" id="videoModal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeVideoModal()">&times;</span>
+            <video id="modalVideo" controls></video>
+            <div class="modal-actions">
+                <button class="btn btn-danger" onclick="regenerateCurrentVideo()">
+                    <span class="btn-icon">🔄</span> 重新生成
+                </button>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

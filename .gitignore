@@ -1,0 +1,15 @@
+# Secrets
+config.json
+
+# Generated Content
+output/
+__pycache__/
+*.pyc
+
+# System
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
