@@ -58,6 +58,15 @@ async function loadConfig() {
 
         if (result.success) {
             currentConfig = result.config;
+
+            // [NEW] 检查并提示配置错误
+            if (result.config_error) {
+                showToast(`⚠️ 配置加载失败: ${result.config_error}`, 'error', 10000);
+            } else {
+                console.log('配置加载成功');
+            }
+
+            // 更新 UI
             populateSettingsForm();
         }
     } catch (error) {
@@ -143,6 +152,12 @@ function populateSettingsForm() {
     document.getElementById('videoApiKey').value = currentConfig.video_api.api_key;
     document.getElementById('videoModel').value = currentConfig.video_api.model;
 
+    // 音频 API
+    if (currentConfig.audio_api) {
+        document.getElementById('audioApiUrl').value = currentConfig.audio_api.base_url || '';
+        document.getElementById('referenceAudio').value = currentConfig.audio_api.reference_audio || '';
+    }
+
     // 默认值处理
     document.getElementById('batchSize').value = currentConfig.generation.batch_size || 1;
 
@@ -173,6 +188,10 @@ async function saveSettings() {
             base_url: document.getElementById('videoApiUrl').value.trim(),
             api_key: document.getElementById('videoApiKey').value.trim(),
             model: document.getElementById('videoModel').value.trim()
+        },
+        audio_api: {
+            base_url: document.getElementById('audioApiUrl').value.trim(),
+            reference_audio: document.getElementById('referenceAudio').value.trim()
         },
         generation: {
             batch_size: parseInt(document.getElementById('batchSize').value) || 1,
@@ -693,10 +712,57 @@ function createPageCard(page) {
                       placeholder="在此输入视频提示词...">${(page.video_prompt || '').replace(/</g, '&lt;')}</textarea>
         </div>
         
-        <!-- 5. 旁白 -->
-        <div class="narration-section">
-            <div class="prompt-label">📖 旁白</div>
-            <div class="narration-text">${shortNarration}</div>
+        <!-- 5. 中文旁白 (可编辑) -->
+        <div class="prompt-section narration-section">
+            <div class="prompt-header">
+                <span class="prompt-label">🇨🇳 中文旁白</span>
+            </div>
+            <textarea class="prompt-input" 
+                      onchange="updatePrompt(${page.page_index}, 'narration', this.value)"
+                      placeholder="在此输入中文旁白...">${(page.narration || '').replace(/</g, '&lt;')}</textarea>
+        </div>
+
+        <!-- 6. 英文旁白 (可编辑) -->
+        <div class="prompt-section narration-section">
+             <div class="prompt-header">
+                <span class="prompt-label">🇺🇸 英文旁白</span>
+            </div>
+            <textarea class="prompt-input" 
+                      onchange="updatePrompt(${page.page_index}, 'eng_narration', this.value)"
+                      placeholder="在此输入英文旁白...">${(page.eng_narration || '').replace(/</g, '&lt;')}</textarea>
+        </div>
+
+        <!-- 7. 配音区域 (双语) -->
+        <div class="audio-section-group">
+            <!-- 中文配音 -->
+            <div class="audio-section">
+                 <div class="section-header-small">
+                    <span>🔊 中文配音</span>
+                    <button class="btn btn-secondary btn-xs" onclick="generatePageAudio(${page.page_index}, 'cn')" id="audio-btn-cn-${page.page_index}">
+                        生成
+                    </button>
+                </div>
+                <div class="audio-preview" id="audio-preview-cn-${page.page_index}">
+                    <div class="audio-placeholder">
+                        <span style="color: #888; font-size: 12px;">暂无</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 英文配音 -->
+            <div class="audio-section">
+                 <div class="section-header-small">
+                    <span>🔊 英文配音</span>
+                    <button class="btn btn-secondary btn-xs" onclick="generatePageAudio(${page.page_index}, 'en')" id="audio-btn-en-${page.page_index}">
+                        生成
+                    </button>
+                </div>
+                <div class="audio-preview" id="audio-preview-en-${page.page_index}">
+                    <div class="audio-placeholder">
+                        <span style="color: #888; font-size: 12px;">暂无</span>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
 
@@ -837,6 +903,86 @@ function updatePageStatus(pageIndex, pageStatus) {
         }
     }
 
+    // 更新音频状态 (双语)
+    // 助手函数: 更新单个音频播放器状态
+    const updateAudioUI = (lang) => {
+        const btn = document.getElementById(`audio-btn-${lang}-${pageIndex}`);
+        const preview = document.getElementById(`audio-preview-${lang}-${pageIndex}`);
+
+        if (!btn || !preview) return;
+
+        // 兼容旧数据: 如果 audio 是 null 或字符串(旧格式)，这就当作 dict处理时会出错，需防御
+        let status = null;
+        if (pageStatus.audio && typeof pageStatus.audio === 'object') {
+            status = pageStatus.audio[lang];
+        } else if (lang === 'cn' && typeof pageStatus.audio === 'string') {
+            // 旧数据兼容
+            status = pageStatus.audio;
+        }
+
+        if (status === 'generating') {
+            btn.disabled = true;
+            btn.textContent = '⏳ ...';
+            preview.innerHTML = `
+                <div class="audio-placeholder">
+                    <div class="spinner-small"></div>
+                    <span>生成中...</span>
+                </div>
+            `;
+        } else if (status === 'completed') {
+            btn.disabled = false;
+            btn.textContent = '生成';
+
+            const projectPath = currentProjectName ? `${currentProjectName}/` : '';
+            const suffix = lang === 'en' ? 'en' : 'cn';
+            // 注意: 后端已经统一为 _cn.wav 和 _en.wav，但为了兼容旧数据，如果是 cn 且 _cn.wav 不存在可能需要fallback? 
+            // 前端只管请求路径。后端 init 逻辑保证了 status=completed 时文件肯定存在 (init会检查 _cn 或 无后缀)
+            // 这里我们请求 _cn.wav 即可，因为后端 generate_page_audio 保证生成带后缀的。
+            // 对于旧文件 (无后缀)，init logic 虽认为 completed，但前端请求可能 404？
+            // 简单处理: 优先请求带后缀，onerror fallback? 不，太复杂。
+            // 假设后端 migrate 或 generate 新文件覆盖。
+            // 实际上 app.py 里 generate_page_audio 生成的是 _cn.wav。
+            // 对于旧文件 page_001.wav, init 逻辑把它算作 cn completed。但前端如果请求 _cn.wav 会挂。
+            // 让前端请求带后缀的，如果旧项目只有无后缀文件，用户需要点击重新生成来“升级”到带后缀文件。
+
+            const audioPath = `/output/${projectPath}audio/page_${String(pageIndex).padStart(3, '0')}_${suffix}.wav`;
+            // 如果是 CN 且 status completed，但文件可能是旧版(无后缀)？
+            // 这是一个小坑。我们在 app.py init 里做了兼容检查。
+            // 为了显示正确，这里路径最好能动态... 但前端不知道具体文件名。
+            // 策略：统一只请求 _cn/_en。如果旧文件存在但新文件不存在，用户点播放404，被迫重新生成。这是可接受的。
+
+            const cacheKey = `audio-${lang}-${pageIndex}`;
+            if (!preview.querySelector('audio') || loadedImages.get(cacheKey) !== audioPath) {
+                loadedImages.set(cacheKey, audioPath);
+                preview.innerHTML = `
+                    <audio controls controlsList="nodownload" src="${audioPath}?t=${Date.now()}" style="width: 100%; height: 30px;"></audio>
+                `;
+            }
+        } else if (status === 'failed') {
+            btn.disabled = false;
+            btn.textContent = '重试';
+            preview.innerHTML = `
+                <div class="audio-placeholder">
+                    <span style="color: red; font-size: 12px;">失败</span>
+                </div>
+            `;
+        } else {
+            // None / Init
+            btn.disabled = false;
+            btn.textContent = '生成';
+            if (!preview.querySelector('audio')) {
+                preview.innerHTML = `
+                    <div class="audio-placeholder">
+                        <span style="color: #888; font-size: 12px;">暂无</span>
+                    </div>
+                `;
+            }
+        }
+    };
+
+    updateAudioUI('cn');
+    updateAudioUI('en');
+
     // 更新选中状态
     if (selectBox) {
         selectBox.checked = pageStatus.selected;
@@ -958,6 +1104,148 @@ async function generatePageVideo(pageIndex) {
             btn.textContent = '🎬 生成视频';
             btn.disabled = false;
         }
+    }
+}
+
+// 注入动态样式
+const style = document.createElement('style');
+style.textContent = `
+    .audio-section-group {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 5px 15px 15px;
+    }
+    .audio-section-group .audio-section {
+        background: rgba(0,0,0,0.1);
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 0;
+    }
+`;
+document.head.appendChild(style);
+
+// ===== 生成单页音频 =====
+async function generatePageAudio(pageIndex, lang = 'cn') {
+    const btn = document.getElementById(`audio-btn-${lang}-${pageIndex}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ ...';
+    }
+
+    try {
+        const response = await fetch(`/api/generate/page-audio/${pageIndex}?lang=${lang}`, { method: 'POST' });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(`${lang === 'cn' ? '中文' : '英文'}音频生成成功`, 'success');
+            refreshStatus();
+        } else {
+            showToast(`生成失败: ${result.error}`, 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '生成';
+            }
+        }
+    } catch (error) {
+        showToast('请求失败: ' + error.message, 'error');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '生成';
+        }
+    }
+}
+
+// ===== 批量生成音频 (双语, 跳过已完成) =====
+async function generateAllAudio() {
+    if (!storyData || !storyData.script) return;
+
+    // 先获取最新状态
+    let statusMap = {};
+    try {
+        const response = await fetch('/api/status');
+        const result = await response.json();
+        if (result.success) {
+            statusMap = result.status.pages || {};
+        }
+    } catch (e) {
+        console.error('获取状态失败', e);
+    }
+
+    // 计算需要生成的任务数
+    let pendingCn = 0, pendingEn = 0, skippedCn = 0, skippedEn = 0;
+
+    storyData.script.forEach(page => {
+        const pageStatus = statusMap[page.page_index];
+        const audioStatus = pageStatus?.audio || {};
+
+        if (audioStatus.cn === 'completed') {
+            skippedCn++;
+        } else {
+            pendingCn++;
+        }
+
+        if (audioStatus.en === 'completed') {
+            skippedEn++;
+        } else {
+            pendingEn++;
+        }
+    });
+
+    const totalPending = pendingCn + pendingEn;
+    const totalSkipped = skippedCn + skippedEn;
+
+    if (totalPending === 0) {
+        showToast('所有音频已生成完毕，无需重复生成', 'info');
+        return;
+    }
+
+    if (!confirm(`批量生成双语音频：\n- 待生成: ${totalPending} 个 (中文 ${pendingCn}, 英文 ${pendingEn})\n- 已跳过: ${totalSkipped} 个\n\nAPI 不支持并发，将逐个生成。是否继续？`)) {
+        return;
+    }
+
+    showToast(`开始批量生成音频 (跳过 ${totalSkipped} 个)...`, 'info');
+
+    // 串行队列
+    const queue = new TaskQueue(1);
+    queue.active = true;
+
+    storyData.script.forEach(page => {
+        const pageStatus = statusMap[page.page_index];
+        const audioStatus = pageStatus?.audio || {};
+
+        // 中文: 仅当未完成时加入队列
+        if (audioStatus.cn !== 'completed') {
+            queue.add(async () => {
+                await generatePageAudio(page.page_index, 'cn');
+            });
+        }
+
+        // 英文: 仅当未完成时加入队列
+        if (audioStatus.en !== 'completed') {
+            queue.add(async () => {
+                await generatePageAudio(page.page_index, 'en');
+            });
+        }
+    });
+
+    queue.start();
+}
+
+// ===== 生成项目 SRT =====
+async function generateProjectSRT() {
+    try {
+        updateProgress('正在生成 SRT 字幕...');
+        const response = await fetch('/api/generate/project-srt', { method: 'POST' });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('SRT 字幕生成成功', 'success');
+        } else {
+            showToast('SRT 生成失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('请求失败: ' + error.message, 'error');
     }
 }
 

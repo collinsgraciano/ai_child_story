@@ -13,6 +13,7 @@ from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from image_generator import ImageGenerator
 from video_generator import VideoGenerator
+from audio_generator import AudioGenerator
 from config_manager import config
 
 app = Flask(__name__, static_folder='static')
@@ -31,18 +32,26 @@ video_gen = VideoGenerator(
     model_name=config.get("video_api", "model")
 )
 
+audio_gen = AudioGenerator(
+    api_url=config.get("audio_api", "base_url") or "",
+    default_ref_audio=config.get("audio_api", "reference_audio")
+)
+
 # 全局状态
 story_data = None
 current_project_dir = None  # 当前项目输出目录
 current_project_name = None  # 当前项目名称（清理后的 title）
 generation_status = {
-    "character_sheet": None,  # None, "generating", "completed", "failed"
+    "character_sheet": None,
     "scene_sheet": None,
-    "pages": {},  # {page_index: {"image": status, "video": status, "selected": bool}}
+    "current_project": None,
+    "pages": {},  # {page_index: {"image": status, "video": status, "audio": status, "selected": bool}}
+    "srt": None   # None, "generating", "completed", "failed"
 }
 
 # 全局任务计数 (Debug)
 active_video_tasks = 0
+active_audio_tasks = 0
 
 def sanitize_filename(name: str) -> str:
     """清理文件名中的非法字符"""
@@ -83,7 +92,9 @@ def reset_generation_status():
     generation_status = {
         "character_sheet": None,
         "scene_sheet": None,
-        "pages": {}
+        "current_project": None,
+        "pages": {},
+        "srt": None
     }
 
 
@@ -103,6 +114,7 @@ def init_project_from_story():
     current_project_dir = os.path.join(os.path.dirname(__file__), "output", current_project_name)
     os.makedirs(os.path.join(current_project_dir, "images"), exist_ok=True)
     os.makedirs(os.path.join(current_project_dir, "videos"), exist_ok=True)
+    os.makedirs(os.path.join(current_project_dir, "audio"), exist_ok=True)
     
     # 更新生成器输出目录
     image_gen.output_dir = current_project_dir
@@ -115,9 +127,32 @@ def init_project_from_story():
             generation_status["pages"][idx] = {
                 "image": None,
                 "video": None,
+                "audio": {"cn": None, "en": None},
                 "selected": False
             }
-    
+        
+        # 检查文件是否存在
+        if generation_status["pages"][idx]["image"] is None:
+            if os.path.exists(f"{current_project_dir}/images/page_{idx:03d}.png"):
+                generation_status["pages"][idx]["image"] = "completed"
+                
+        if generation_status["pages"][idx]["video"] is None:
+            if os.path.exists(f"{current_project_dir}/videos/page_{idx:03d}.mp4"):
+                generation_status["pages"][idx]["video"] = "completed"
+
+        # 检查音频状态 (双语)
+        if generation_status["pages"][idx]["audio"] is None: # fix dirty data if needed
+             generation_status["pages"][idx]["audio"] = {"cn": None, "en": None}
+             
+        if generation_status["pages"][idx]["audio"]["cn"] is None:
+            if os.path.exists(f"{current_project_dir}/audio/page_{idx:03d}_cn.wav") or \
+               os.path.exists(f"{current_project_dir}/audio/page_{idx:03d}.wav"):
+                generation_status["pages"][idx]["audio"]["cn"] = "completed"
+                
+        if generation_status["pages"][idx]["audio"]["en"] is None:
+            if os.path.exists(f"{current_project_dir}/audio/page_{idx:03d}_en.wav"):
+                generation_status["pages"][idx]["audio"]["en"] = "completed"
+
     return True
 
 
@@ -147,9 +182,13 @@ load_story_data()
 @app.route('/api/config', methods=['GET'])
 def get_config():
     """获取当前配置"""
+    # 强制重载以获取最新状态和错误
+    current_config = config.to_dict()
+    
     return jsonify({
         "success": True,
-        "config": config.to_dict()
+        "config": current_config,
+        "config_error": config.last_error # [NEW] 暴露配置加载错误
     })
 
 
@@ -188,6 +227,19 @@ def update_config():
                 api_key=config.get("video_api", "api_key"),
                 base_url=config.get("video_api", "base_url"),
                 model_name=config.get("video_api", "model")
+            )
+        
+        # [FIX] 更新音频 API 配置
+        if "audio_api" in data:
+            audio_cfg = data["audio_api"]
+            config.update_audio_api(
+                base_url=audio_cfg.get("base_url", config.get("audio_api", "base_url")),
+                reference_audio=audio_cfg.get("reference_audio", config.get("audio_api", "reference_audio"))
+            )
+            # 更新生成器
+            audio_gen.update_config(
+                api_url=config.get("audio_api", "base_url"),
+                default_ref_audio=config.get("audio_api", "reference_audio")
             )
         
         # 更新其他配置
@@ -781,7 +833,144 @@ def generate_page_video(page_index):
         return jsonify({"success": False, "error": str(e)})
 
 
-@app.route('/api/select/<int:page_index>', methods=['POST'])
+@app.route('/api/generate/page-audio/<int:page_index>', methods=['POST'])
+def generate_page_audio(page_index):
+    """生成分镜音频"""
+    global active_audio_tasks
+    active_audio_tasks += 1
+    
+    # 获取语言参数
+    lang = request.args.get('lang', 'cn') # 'cn' or 'en'
+    
+    print(f"🔊 [Start] Audio Task for Page {page_index} ({lang}) | Active Tasks: {active_audio_tasks}")
+
+    if story_data is None:
+        active_audio_tasks -= 1
+        return jsonify({"success": False, "error": "故事数据未加载"})
+    
+    page = next((p for p in story_data["script"] if p["page_index"] == page_index), None)
+    if not page:
+        active_audio_tasks -= 1
+        return jsonify({"success": False, "error": "页码不存在"})
+        
+    # 状态更新 (字典结构)
+    if generation_status["pages"][page_index]["audio"] is None:
+         generation_status["pages"][page_index]["audio"] = {"cn": None, "en": None}
+    
+    # 兼容旧状态如果是字符串的情况 (虽然 init 做了处理，以防万一)
+    if isinstance(generation_status["pages"][page_index]["audio"], str):
+         generation_status["pages"][page_index]["audio"] = {"cn": None, "en": None}
+         
+    generation_status["pages"][page_index]["audio"][lang] = "generating"
+    
+    try:
+        # [FIX] 强制同步最新的 Audio 配置 (确保手动修改 config.json 生效)
+        current_api_url = config.get("audio_api", "base_url")
+        current_ref_audio = config.get("audio_api", "reference_audio")
+        
+        # 如果配置有变，或者为了保险起见，更新 audio_gen
+        if current_api_url != audio_gen.api_url or current_ref_audio != audio_gen.default_ref_audio:
+            print(f"🔄 Syncing Audio Config: {current_api_url}")
+            audio_gen.update_config(current_api_url, current_ref_audio)
+
+        # 确定文件名和文本键
+        filename_suffix = "en" if lang == "en" else "cn"
+        text_key = "eng_narration" if lang == "en" else "narration"
+        
+        audio_path = f"output/{current_project_name}/audio/page_{page_index:03d}_{filename_suffix}.wav"
+        
+        # 清理旧音频
+        if os.path.exists(audio_path):
+            try:
+                os.remove(audio_path)
+            except:
+                pass
+                
+        # 朗读文本
+        text = page.get(text_key, "")
+        if not text:
+             active_audio_tasks -= 1
+             return jsonify({"success": False, "error": f"{lang} 旁白为空"})
+
+        # 生成
+        result = audio_gen.generate_audio(
+            text=text,
+            output_path=audio_path,
+            ref_audio_path=config.get("audio_api", "reference_audio"),
+            lang=lang
+        )
+        
+        if result["success"]:
+            generation_status["pages"][page_index]["audio"][lang] = "completed"
+            active_audio_tasks -= 1
+            print(f"✅ [End] Audio Task for Page {page_index} ({lang}) | Active Tasks: {active_audio_tasks}")
+            return jsonify({
+                "success": True,
+                "audio_path": f"/output/{current_project_name}/audio/page_{page_index:03d}_{filename_suffix}.wav",
+                "message": f"{lang.upper()} 音频生成成功"
+            })
+        else:
+            generation_status["pages"][page_index]["audio"][lang] = "failed"
+            active_audio_tasks -= 1
+            print(f"❌ [Fail] Audio Task for Page {page_index} ({lang}) | Active Tasks: {active_audio_tasks}")
+            return jsonify({"success": False, "error": result["error"]})
+            
+    except Exception as e:
+        print(f"音频生成异常: {e}")
+        if isinstance(generation_status["pages"][page_index]["audio"], dict):
+            generation_status["pages"][page_index]["audio"][lang] = "failed"
+        active_audio_tasks -= 1
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route('/api/generate/project-srt', methods=['POST'])
+def generate_project_srt():
+    """生成项目 SRT"""
+    if story_data is None:
+        return jsonify({"success": False, "error": "故事数据未加载"})
+        
+    generation_status["srt"] = "generating"
+    
+    try:
+        audio_dir = f"output/{current_project_name}/audio"
+        
+        # 1. 生成中文 SRT
+        srt_cn_path = f"output/{current_project_name}/{current_project_name}_cn.srt"
+        res_cn = audio_gen.generate_project_srt(
+            pages=story_data["script"],
+            audio_dir=audio_dir,
+            output_srt_path=srt_cn_path,
+            lang="cn"
+        )
+        
+        # 2. 生成英文 SRT
+        srt_en_path = f"output/{current_project_name}/{current_project_name}_en.srt"
+        res_en = audio_gen.generate_project_srt(
+            pages=story_data["script"],
+            audio_dir=audio_dir,
+            output_srt_path=srt_en_path,
+            lang="en"
+        )
+        
+        if res_cn["success"] and res_en["success"]:
+            generation_status["srt"] = "completed"
+            return jsonify({
+                "success": True,
+                "message": "双语 SRT 字幕生成成功"
+            })
+        elif res_cn["success"]:
+             generation_status["srt"] = "completed"
+             return jsonify({"success": True, "message": "中文 SRT 生成成功, 英文失败: " + res_en.get("error", "")})
+        elif res_en["success"]:
+             generation_status["srt"] = "completed"
+             return jsonify({"success": True, "message": "英文 SRT 生成成功, 中文失败: " + res_cn.get("error", "")})
+        else:
+            generation_status["srt"] = "failed"
+            return jsonify({"success": False, "error": "SRT 生成失败"})
+            
+    except Exception as e:
+        generation_status["srt"] = "failed"
+        return jsonify({"success": False, "error": str(e)})
 def toggle_select(page_index):
     """切换页面选中状态"""
     if page_index not in generation_status["pages"]:
@@ -833,4 +1022,4 @@ if __name__ == '__main__':
     print("=" * 50)
     print("启动服务器: http://localhost:5000")
     print("=" * 50)
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)

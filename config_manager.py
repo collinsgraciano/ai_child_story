@@ -5,6 +5,7 @@
 
 import os
 import json
+import copy
 from pathlib import Path
 
 
@@ -22,6 +23,10 @@ class Config:
             "base_url": "http://127.0.0.1:8003/v1",
             "api_key": "sk-dummy",
             "model": "sora"
+        },
+        "audio_api": {
+            "base_url": "https://11111.gradio.live",
+            "reference_audio": "d:\\gemini\\child_story\\10s.mp3"
         },
         "generation": {
             "image_size": "1024x1024",
@@ -46,27 +51,46 @@ class Config:
             config_path = os.path.join(os.path.dirname(__file__), "config.json")
         
         self.config_path = config_path
+        self.last_error = None # [NEW] 记录最近一次加载错误
         self.config = self.load_config()
     
     def load_config(self) -> dict:
         """加载配置文件，如果不存在则使用默认配置"""
+        print(f"📂 [Config] Loading from: {self.config_path}")
+        self.last_error = None # Reset error
+        
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                # 合并默认配置（确保新增的配置项有默认值）
+                    content = f.read().strip()
+                    if not content:
+                         # Handle empty file explicitly
+                         raise json.JSONDecodeError("File is empty", "", 0)
+                    loaded = json.loads(content)
+                    
+                print("✅ [Config] Loaded successfully.")
                 return self._merge_config(self.DEFAULT_CONFIG, loaded)
+                
+            except json.JSONDecodeError as e:
+                err_msg = f"JSON format error: {e.msg} at line {e.lineno}"
+                print(f"❌ [Config] {err_msg}")
+                self.last_error = err_msg
+                return copy.deepcopy(self.DEFAULT_CONFIG)
+                
             except Exception as e:
-                print(f"加载配置失败: {e}，使用默认配置")
-                return self.DEFAULT_CONFIG.copy()
+                err_msg = f"Load failed: {str(e)}"
+                print(f"❌ [Config] {err_msg}")
+                self.last_error = err_msg
+                return copy.deepcopy(self.DEFAULT_CONFIG)
         else:
+            print("⚠️ [Config] File not found. Creating default.")
             # 保存默认配置
             self.save_config(self.DEFAULT_CONFIG)
-            return self.DEFAULT_CONFIG.copy()
+            return copy.deepcopy(self.DEFAULT_CONFIG)
     
     def _merge_config(self, default: dict, loaded: dict) -> dict:
         """递归合并配置"""
-        result = default.copy()
+        result = copy.deepcopy(default)
         for key, value in loaded.items():
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 result[key] = self._merge_config(result[key], value)
@@ -76,20 +100,28 @@ class Config:
     
     def save_config(self, config: dict = None):
         """保存配置到文件"""
+        print(f"💾 [Config] Saving to {self.config_path}...")
         if config is not None:
             self.config = config
         
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(self.config, f, ensure_ascii=False, indent=2)
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+            print("✅ [Config] Saved.")
+        except Exception as e:
+            print(f"❌ [Config] Save failed: {e}")
     
     def get(self, *keys, default=None):
         """
-        获取配置值
+        获取配置值 (每次获取前尝试重新加载，确保文件修改生效)
         
         Args:
             keys: 配置路径，如 get("image_api", "base_url")
             default: 默认值
         """
+        # [NEW] 每次获取配置时重新加载，解决用户手动修改 config.json 不生效的问题
+        self.reload()
+        
         result = self.config
         for key in keys:
             if isinstance(result, dict) and key in result:
@@ -97,6 +129,10 @@ class Config:
             else:
                 return default
         return result
+
+    def reload(self):
+        """强制从磁盘重新加载配置"""
+        self.config = self.load_config()
     
     def set(self, *keys, value):
         """
@@ -127,6 +163,14 @@ class Config:
         }
         self.save_config()
     
+    def update_audio_api(self, base_url: str, reference_audio: str):
+        """更新音频 API 配置"""
+        self.config["audio_api"] = {
+            "base_url": base_url,
+            "reference_audio": reference_audio
+        }
+        self.save_config()
+    
     def update_video_api(self, base_url: str, api_key: str, model: str):
         """更新视频 API 配置"""
         self.config["video_api"] = {
@@ -138,7 +182,9 @@ class Config:
     
     def to_dict(self) -> dict:
         """返回完整配置字典"""
-        return self.config.copy()
+        # [FIX] 确保返回最新配置
+        self.reload()
+        return copy.deepcopy(self.config)
 
 
 # 全局配置实例
