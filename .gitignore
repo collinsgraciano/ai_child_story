@@ -1,6 +1,6 @@
 # Secrets
 config.json
-
+config copy.json
 # Generated Content
 output/
 __pycache__/
