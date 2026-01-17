@@ -25,6 +25,7 @@ image_gen = ImageGenerator(
     base_url=config.get("image_api", "base_url")
 )
 image_gen.model = config.get("image_api", "model")
+image_gen.max_retries = config.get("generation", "image_max_retries") or 3
 
 video_gen = VideoGenerator(
     api_key=config.get("video_api", "api_key"),
@@ -41,6 +42,12 @@ audio_gen = AudioGenerator(
 story_data = None
 current_project_dir = None  # 当前项目输出目录
 current_project_name = None  # 当前项目名称（清理后的 title）
+current_style = None  # 当前选中的风格名称
+
+# 风格图片目录
+STYLES_DIR = os.path.join(os.path.dirname(__file__), "styles")
+os.makedirs(STYLES_DIR, exist_ok=True)
+
 generation_status = {
     "character_sheet": None,
     "scene_sheet": None,
@@ -258,6 +265,113 @@ def update_config():
             "success": False,
             "error": str(e)
         })
+
+
+# ===== 风格管理 API =====
+
+@app.route('/api/styles', methods=['GET'])
+def list_styles():
+    """获取所有已保存的风格"""
+    styles = []
+    for f in os.listdir(STYLES_DIR):
+        if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+            name = os.path.splitext(f)[0]
+            styles.append({
+                "name": name,
+                "path": f"/styles/{f}"
+            })
+    return jsonify({
+        "success": True,
+        "styles": styles,
+        "current_style": current_style
+    })
+
+
+@app.route('/api/styles', methods=['POST'])
+def upload_style():
+    """上传新风格图片"""
+    global current_style
+    
+    if 'file' not in request.files:
+        return jsonify({"success": False, "error": "未找到上传文件"})
+    
+    file = request.files['file']
+    name = request.form.get('name', '').strip()
+    
+    if not name:
+        return jsonify({"success": False, "error": "请提供风格名称"})
+    
+    if not file.filename:
+        return jsonify({"success": False, "error": "文件名为空"})
+    
+    # 保存文件
+    ext = os.path.splitext(file.filename)[1].lower() or '.png'
+    save_path = os.path.join(STYLES_DIR, f"{name}{ext}")
+    file.save(save_path)
+    
+    # 自动设为当前风格
+    current_style = name
+    
+    return jsonify({
+        "success": True,
+        "message": f"风格 '{name}' 上传成功",
+        "path": f"/styles/{name}{ext}"
+    })
+
+
+@app.route('/api/styles/<name>', methods=['DELETE'])
+def delete_style(name):
+    """删除风格"""
+    global current_style
+    
+    # 查找匹配的文件
+    for f in os.listdir(STYLES_DIR):
+        if os.path.splitext(f)[0] == name:
+            os.remove(os.path.join(STYLES_DIR, f))
+            if current_style == name:
+                current_style = None
+            return jsonify({"success": True, "message": f"风格 '{name}' 已删除"})
+    
+    return jsonify({"success": False, "error": f"风格 '{name}' 不存在"})
+
+
+@app.route('/api/styles/current', methods=['GET'])
+def get_current_style():
+    """获取当前选中的风格"""
+    return jsonify({
+        "success": True,
+        "current_style": current_style
+    })
+
+
+@app.route('/api/styles/current', methods=['POST'])
+def set_current_style():
+    """设置当前风格"""
+    global current_style
+    data = request.get_json()
+    name = data.get("name")
+    
+    if name:
+        # 验证风格存在
+        found = False
+        for f in os.listdir(STYLES_DIR):
+            if os.path.splitext(f)[0] == name:
+                found = True
+                break
+        if not found:
+            return jsonify({"success": False, "error": f"风格 '{name}' 不存在"})
+    
+    current_style = name
+    return jsonify({
+        "success": True,
+        "current_style": current_style
+    })
+
+
+@app.route('/styles/<path:filename>')
+def serve_style(filename):
+    """提供风格图片静态文件服务"""
+    return send_from_directory(STYLES_DIR, filename)
 
 
 @app.route('/api/config/test-image-api', methods=['POST'])
@@ -604,21 +718,35 @@ def get_status():
 
 @app.route('/api/generate/character-sheet', methods=['POST'])
 def generate_character_sheet():
-    """生成角色设计稿"""
+    """生成角色设计稿 (参考风格图)"""
     if story_data is None:
         return jsonify({"success": False, "error": "故事数据未加载"})
     
     generation_status["character_sheet"] = "generating"
     
     prompt = story_data.get("character_sheet_prompt", "")
-    result = image_gen.generate_text_to_image(prompt, "character_sheet")
+    
+    # [NEW] 使用风格图作为参考
+    ref_images = []
+    if current_style:
+        for f in os.listdir(STYLES_DIR):
+            if os.path.splitext(f)[0] == current_style:
+                style_path = os.path.join(STYLES_DIR, f)
+                if os.path.exists(style_path):
+                    ref_images.append(style_path)
+                break
+    
+    if ref_images:
+        result = image_gen.generate_with_reference(prompt, ref_images, "character_sheet")
+    else:
+        result = image_gen.generate_text_to_image(prompt, "character_sheet")
     
     if result["success"]:
         generation_status["character_sheet"] = "completed"
         return jsonify({
             "success": True,
             "path": f"/output/{current_project_name}/character_sheet.png",
-            "message": "角色设计稿生成成功"
+            "message": "角色设计稿生成成功" + (f" (参考风格: {current_style})" if current_style else "")
         })
     else:
         generation_status["character_sheet"] = "failed"
@@ -630,7 +758,7 @@ def generate_character_sheet():
 
 @app.route('/api/generate/scene-sheet', methods=['POST'])
 def generate_scene_sheet():
-    """生成场景设计稿（参考角色设计稿）"""
+    """生成场景设计稿（参考风格图 + 角色设计稿）"""
     if story_data is None:
         return jsonify({"success": False, "error": "故事数据未加载"})
     
@@ -638,9 +766,22 @@ def generate_scene_sheet():
     
     prompt = story_data.get("scene_sheet_prompt", "")
     
-    # 使用角色设计稿作为参考图
+    # [UPDATED] 参考图: 风格图 (优先) + 角色设计稿
+    ref_images = []
+    
+    # 1. 风格图
+    if current_style:
+        for f in os.listdir(STYLES_DIR):
+            if os.path.splitext(f)[0] == current_style:
+                style_path = os.path.join(STYLES_DIR, f)
+                if os.path.exists(style_path):
+                    ref_images.append(style_path)
+                break
+    
+    # 2. 角色设计稿
     char_sheet_path = image_gen.get_character_sheet_path()
-    ref_images = [char_sheet_path] if os.path.exists(char_sheet_path) else []
+    if os.path.exists(char_sheet_path):
+        ref_images.append(char_sheet_path)
     
     result = image_gen.generate_with_reference(prompt, ref_images, "scene_sheet")
     
@@ -649,7 +790,7 @@ def generate_scene_sheet():
         return jsonify({
             "success": True,
             "path": f"/output/{current_project_name}/scene_sheet.png",
-            "message": "场景设计稿生成成功"
+            "message": "场景设计稿生成成功" + (f" (参考风格: {current_style})" if current_style else "")
         })
     else:
         generation_status["scene_sheet"] = "failed"

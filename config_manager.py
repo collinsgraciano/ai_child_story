@@ -30,6 +30,7 @@ class Config:
         },
         "generation": {
             "image_size": "1024x1024",
+            "image_max_retries": 3,
             "video_max_retries": 10,
             "download_timeout": 120,
             "batch_size": 1,

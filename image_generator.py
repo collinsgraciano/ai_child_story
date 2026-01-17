@@ -24,6 +24,7 @@ class ImageGenerator:
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
         self.model = "gemini-3-pro-preview-image"
+        self.max_retries = 3  # [NEW] 默认重试次数
         # self.image_size 已移除，不再使用
         self._output_dir = os.path.join(os.path.dirname(__file__), "output")
         
@@ -90,7 +91,26 @@ class ImageGenerator:
 
     def generate_with_reference(self, prompt: str, ref_images: list, filename: str) -> dict:
         """
-        核心生成方法：使用 requests 发送请求
+        核心生成方法：使用 requests 发送请求（支持重试）
+        """
+        last_error = None
+        for attempt in range(self.max_retries + 1):
+            if attempt > 0:
+                print(f"🔄 重试 {attempt}/{self.max_retries}...")
+            
+            result = self._do_generate(prompt, ref_images, filename)
+            
+            if result["success"]:
+                return result
+            
+            last_error = result.get("error", "Unknown error")
+            print(f"⚠️ 第 {attempt + 1} 次尝试失败: {last_error}")
+        
+        return {"success": False, "error": f"重试 {self.max_retries} 次后仍失败: {last_error}"}
+
+    def _do_generate(self, prompt: str, ref_images: list, filename: str) -> dict:
+        """
+        实际执行生成的内部方法
         """
         # 构造 URL
         # 确保 base_url 包含 /v1

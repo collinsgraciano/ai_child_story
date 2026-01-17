@@ -26,10 +26,144 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     loadConfig();
     loadProjects();  // 加载项目列表
+    loadStyles();    // [NEW] 加载风格列表
 
     // 定期刷新状态
     setInterval(refreshStatus, 5000);
 });
+
+// ===== 风格管理 =====
+let currentStyleName = null;
+
+async function loadStyles() {
+    try {
+        const response = await fetch('/api/styles');
+        const result = await response.json();
+
+        if (result.success) {
+            const select = document.getElementById('styleSelect');
+            select.innerHTML = '<option value="">-- 无风格 --</option>';
+
+            result.styles.forEach(style => {
+                const option = document.createElement('option');
+                option.value = style.name;
+                option.textContent = style.name;
+                select.appendChild(option);
+            });
+
+            // 设置当前选中
+            if (result.current_style) {
+                select.value = result.current_style;
+                currentStyleName = result.current_style;
+                updateStylePreview(result.styles.find(s => s.name === result.current_style));
+            }
+        }
+    } catch (error) {
+        console.error('加载风格列表失败', error);
+    }
+}
+
+function updateStylePreview(style) {
+    const preview = document.getElementById('stylePreview');
+    const img = document.getElementById('stylePreviewImg');
+    const deleteBtn = document.getElementById('deleteStyleBtn');
+
+    if (style && style.path) {
+        img.src = style.path;
+        preview.style.display = 'block';
+        deleteBtn.style.display = 'block';
+    } else {
+        preview.style.display = 'none';
+        deleteBtn.style.display = 'none';
+    }
+}
+
+async function selectStyle(name) {
+    try {
+        const response = await fetch('/api/styles/current', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name || null })
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            currentStyleName = result.current_style;
+
+            // 更新预览
+            if (name) {
+                const stylesRes = await fetch('/api/styles');
+                const stylesData = await stylesRes.json();
+                const style = stylesData.styles.find(s => s.name === name);
+                updateStylePreview(style);
+            } else {
+                updateStylePreview(null);
+            }
+
+            showToast(name ? `已选择风格: ${name}` : '已清除风格', 'success');
+        }
+    } catch (error) {
+        showToast('选择风格失败: ' + error.message, 'error');
+    }
+}
+
+async function uploadStyleFile(input) {
+    if (!input.files || !input.files[0]) return;
+
+    const file = input.files[0];
+    const name = prompt('请输入风格名称（便于识别）:', file.name.replace(/\.[^.]+$/, ''));
+
+    if (!name) {
+        input.value = '';
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', name);
+
+    try {
+        const response = await fetch('/api/styles', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadStyles();  // 刷新列表
+        } else {
+            showToast('上传失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('上传失败: ' + error.message, 'error');
+    }
+
+    input.value = '';  // 清空以允许重复上传同一文件
+}
+
+async function deleteCurrentStyle() {
+    const name = document.getElementById('styleSelect').value;
+    if (!name) return;
+
+    if (!confirm(`确定删除风格 "${name}" 吗？`)) return;
+
+    try {
+        const response = await fetch(`/api/styles/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadStyles();
+        } else {
+            showToast('删除失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('删除失败: ' + error.message, 'error');
+    }
+}
 
 // ===== 加载故事数据 =====
 async function loadStory() {
@@ -42,11 +176,52 @@ async function loadStory() {
             updateHeader();
             renderPages();
             refreshStatus();
+            populateSheetPrompts(); // [NEW] 填充设计稿提示词
         } else {
             showToast('加载故事失败: ' + result.error, 'error');
         }
     } catch (error) {
         showToast('网络错误: ' + error.message, 'error');
+    }
+}
+
+// ===== 填充设计稿提示词 =====
+function populateSheetPrompts() {
+    if (!storyData) return;
+
+    const charInput = document.getElementById('characterPromptInput');
+    const sceneInput = document.getElementById('scenePromptInput');
+
+    if (charInput && storyData.character_sheet_prompt) {
+        charInput.value = storyData.character_sheet_prompt;
+    }
+    if (sceneInput && storyData.scene_sheet_prompt) {
+        sceneInput.value = storyData.scene_sheet_prompt;
+    }
+}
+
+// ===== 更新设计稿提示词 =====
+async function updateSheetPrompt(promptType, value) {
+    try {
+        const response = await fetch('/api/story/update-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt_type: promptType,
+                value: value
+            })
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            // 更新本地数据
+            storyData[promptType] = value;
+            showToast('提示词已保存', 'success');
+        } else {
+            showToast('保存失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('保存失败: ' + error.message, 'error');
     }
 }
 
@@ -165,6 +340,10 @@ function populateSettingsForm() {
     const concurrency = (currentConfig.generation && currentConfig.generation.concurrency) || {};
     document.getElementById('concurrencyImage').value = concurrency.image || 2;
     document.getElementById('concurrencyVideo').value = concurrency.video || 1;
+
+    // 图片重试次数
+    document.getElementById('imageMaxRetries').value = currentConfig.generation.image_max_retries ?? 3;
+
     console.log(`[Config] Loaded concurrency: Image=${concurrency.image}, Video=${concurrency.video}`);
 }
 
@@ -195,6 +374,7 @@ async function saveSettings() {
         },
         generation: {
             batch_size: parseInt(document.getElementById('batchSize').value) || 1,
+            image_max_retries: parseInt(document.getElementById('imageMaxRetries').value) ?? 3,
             concurrency: {
                 image: parseInt(document.getElementById('concurrencyImage').value) || 2,
                 video: parseInt(document.getElementById('concurrencyVideo').value) || 1
@@ -377,24 +557,59 @@ async function generateAllImagesAndVideos() {
     showToast('全流程生成任务完成！', 'success');
 }
 
-// ===== 批量生成图片 (重构支持并发) =====
+// ===== 批量生成图片 (跳过已完成) =====
 async function generateAllImages(isChained = false) {
     if (!storyData || !storyData.script) {
         showToast('请先加载故事数据', 'error');
         return;
     }
 
+    // 先获取最新状态
+    let statusMap = {};
+    try {
+        const response = await fetch('/api/status');
+        const result = await response.json();
+        if (result.success) {
+            statusMap = result.status.pages || {};
+        }
+    } catch (e) {
+        console.error('获取状态失败', e);
+    }
+
+    // 计算需要生成的任务数
+    let pending = 0, skipped = 0;
+    storyData.script.forEach(page => {
+        const pageStatus = statusMap[page.page_index];
+        if (pageStatus?.image === 'completed') {
+            skipped++;
+        } else {
+            pending++;
+        }
+    });
+
+    if (pending === 0 && !isChained) {
+        showToast('所有分镜图片已生成完毕，无需重复生成', 'info');
+        return;
+    }
+
     const concurrency = currentConfig?.generation?.concurrency?.image || 2;
     const queue = new TaskQueue(concurrency);
 
-    updateProgress(`开始批量生成图片 (并发: ${concurrency})...`);
+    if (!isChained) {
+        updateProgress(`开始批量生成图片 (待生成: ${pending}, 已跳过: ${skipped}, 并发: ${concurrency})...`);
+    }
 
     // 1. 确保设计稿 (串行)
     if (!loadedSheets.character) await generateCharacterSheet();
     if (!loadedSheets.scene) await generateSceneSheet();
 
-    // 2. 提交分镜任务
+    // 2. 提交分镜任务 (跳过已完成)
     for (const page of storyData.script) {
+        const pageStatus = statusMap[page.page_index];
+        if (pageStatus?.image === 'completed') {
+            continue; // 跳过已完成
+        }
+
         queue.add(async () => {
             updateProgress(`正在请求第 ${page.page_index} 页图片...`);
             await generatePageImage(page.page_index);
@@ -466,6 +681,9 @@ async function loadJsonInput() {
             if (jsonInputVisible) {
                 toggleJsonInput();
             }
+
+            // 刷新页面以确保状态完全更新
+            location.reload();
         } else {
             jsonStatus.textContent = `❌ ${result.error}`;
             showToast('加载失败: ' + result.error, 'error');
@@ -532,6 +750,8 @@ async function switchProject(projectName, silent = false) {
 
             if (!silent) {
                 showToast(`已切换到项目: ${result.title}`, 'success');
+                // 刷新页面以确保状态完全更新
+                location.reload();
             }
         } else if (!silent) {
             showToast('切换项目失败: ' + result.error, 'error');
@@ -1395,7 +1615,7 @@ function updateProgress(text) {
 }
 
 // ===== 显示 Toast 提示 =====
-function showToast(message, type = 'success') {
+function showToast(message, type = 'success', duration = 3000) {
     // 移除现有 toast
     const existingToast = document.querySelector('.toast');
     if (existingToast) {
@@ -1412,7 +1632,100 @@ function showToast(message, type = 'success') {
     setTimeout(() => {
         toast.classList.remove('show');
         setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    }, duration);
+}
+
+// ===== 生成角色设计稿 =====
+async function generateCharacterSheet() {
+    const btn = document.querySelector('#characterSheet button');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-icon">⏳</span> 生成中...';
+    }
+
+    try {
+        const response = await fetch('/api/generate/character-sheet', { method: 'POST' });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message, 'success');
+            refreshStatus();
+        } else {
+            showToast('生成失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('网络错误: ' + error.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="btn-icon">✨</span> 生成角色设计稿';
+        }
+    }
+}
+
+// ===== 生成场景设计稿 =====
+async function generateSceneSheet() {
+    const btn = document.querySelector('#sceneSheet button');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-icon">⏳</span> 生成中...';
+    }
+
+    try {
+        const response = await fetch('/api/generate/scene-sheet', { method: 'POST' });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message, 'success');
+            refreshStatus();
+        } else {
+            showToast('生成失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('网络错误: ' + error.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="btn-icon">✨</span> 生成场景设计稿';
+        }
+    }
+}
+
+// ===== 一键生成设计稿 (角色 → 场景) =====
+async function generateAllSheets() {
+    if (!confirm('将按顺序生成角色设计稿和场景设计稿。是否继续？')) {
+        return;
+    }
+
+    showToast('正在生成角色设计稿...', 'info');
+
+    // 1. 先生成角色设计稿
+    try {
+        const charResponse = await fetch('/api/generate/character-sheet', { method: 'POST' });
+        const charResult = await charResponse.json();
+
+        if (!charResult.success) {
+            showToast('角色设计稿生成失败: ' + charResult.error, 'error');
+            return;
+        }
+
+        showToast('角色设计稿完成，正在生成场景设计稿...', 'info');
+        refreshStatus();
+
+        // 2. 再生成场景设计稿
+        const sceneResponse = await fetch('/api/generate/scene-sheet', { method: 'POST' });
+        const sceneResult = await sceneResponse.json();
+
+        if (sceneResult.success) {
+            showToast('🎉 所有设计稿生成完成！', 'success');
+            refreshStatus();
+        } else {
+            showToast('场景设计稿生成失败: ' + sceneResult.error, 'error');
+        }
+
+    } catch (error) {
+        showToast('生成失败: ' + error.message, 'error');
+    }
 }
 
 // ===== 点击模态框外部关闭 =====

@@ -88,6 +88,12 @@
                         <small
                             style="color: var(--text-secondary); display: block; margin-top: 4px;">同时生成的视频任务数量。</small>
                     </div>
+                    <div class="form-group">
+                        <label for="imageMaxRetries">图片失败重试次数</label>
+                        <input type="number" id="imageMaxRetries" min="0" max="10" value="3" placeholder="默认: 3">
+                        <small
+                            style="color: var(--text-secondary); display: block; margin-top: 4px;">图片生成失败后的重试次数。</small>
+                    </div>
                 </div>
             </div>
 
@@ -135,39 +141,98 @@
                 <h2 class="section-title">📋 设计稿</h2>
                 <p class="section-desc">首先生成角色和场景设计稿，作为后续所有分镜的参考</p>
 
-                <div class="sheets-grid">
+                <!-- 风格选择器 -->
+                <div class="style-selector"
+                    style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 12px;">
+                    <span style="font-weight: 600;">🎨 风格参考:</span>
+                    <select id="styleSelect" onchange="selectStyle(this.value)"
+                        style="flex: 1; max-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-primary);">
+                        <option value="">-- 无风格 --</option>
+                    </select>
+                    <button class="btn btn-secondary" onclick="document.getElementById('styleFileInput').click()"
+                        style="padding: 8px 12px;">
+                        <span class="btn-icon">📤</span> 上传新风格
+                    </button>
+                    <input type="file" id="styleFileInput" accept="image/*" style="display: none;"
+                        onchange="uploadStyleFile(this)">
+                    <button class="btn btn-danger" onclick="deleteCurrentStyle()" id="deleteStyleBtn"
+                        style="padding: 8px 12px; display: none;">
+                        <span class="btn-icon">🗑️</span> 删除
+                    </button>
+                    <div id="stylePreview"
+                        style="width: 50px; height: 50px; border-radius: 8px; overflow: hidden; border: 2px solid var(--border-color); display: none;">
+                        <img id="stylePreviewImg" src="" alt="style"
+                            style="width: 100%; height: 100%; object-fit: cover;">
+                    </div>
+                </div>
+
+                <!-- 一键生成按钮 -->
+                <div style="margin-bottom: 15px;">
+                    <button class="btn btn-primary" onclick="generateAllSheets()" style="width: auto;">
+                        <span class="btn-icon">🚀</span> 一键生成设计稿 (角色 → 场景)
+                    </button>
+                </div>
+
+                <div class="sheets-grid"
+                    style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 20px;">
                     <!-- 角色设计稿 -->
-                    <div class="sheet-card" id="characterSheet">
-                        <div class="sheet-header">
-                            <h3>👤 角色设计稿</h3>
+                    <div class="page-card" id="characterSheet"
+                        style="background: var(--bg-card); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg);">
+                        <div class="page-header"
+                            style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: rgba(99,102,241,0.2);">
+                            <span style="font-weight: 600;">👤 角色设计稿</span>
                             <span class="status-badge" id="characterStatus">未生成</span>
                         </div>
-                        <div class="sheet-preview" id="characterPreview">
-                            <div class="placeholder">
-                                <span class="icon">🎨</span>
-                                <p>点击下方按钮生成</p>
+                        <div class="sheet-preview" id="characterPreview"
+                            style="min-height: 200px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.2);">
+                            <div class="placeholder" style="text-align: center; color: var(--text-secondary);">
+                                <span style="font-size: 2rem;">🎨</span>
+                                <p style="margin-top: 8px;">点击下方按钮生成</p>
                             </div>
                         </div>
-                        <button class="btn btn-primary" onclick="generateCharacterSheet()">
-                            <span class="btn-icon">✨</span> 生成角色设计稿
-                        </button>
+                        <div class="prompt-section" style="padding: 15px;">
+                            <label
+                                style="font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; display: block;">📝
+                                提示词</label>
+                            <textarea id="characterPromptInput"
+                                style="width: 100%; min-height: 80px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); padding: 10px; resize: vertical; font-size: 13px;"
+                                onchange="updateSheetPrompt('character_sheet_prompt', this.value)"></textarea>
+                        </div>
+                        <div style="padding: 0 15px 15px;">
+                            <button class="btn btn-primary" onclick="generateCharacterSheet()" style="width: 100%;">
+                                <span class="btn-icon">✨</span> 生成角色设计稿
+                            </button>
+                        </div>
                     </div>
 
                     <!-- 场景设计稿 -->
-                    <div class="sheet-card" id="sceneSheet">
-                        <div class="sheet-header">
-                            <h3>🏞️ 场景设计稿</h3>
+                    <div class="page-card" id="sceneSheet"
+                        style="background: var(--bg-card); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg);">
+                        <div class="page-header"
+                            style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: rgba(139,92,246,0.2);">
+                            <span style="font-weight: 600;">🏞️ 场景设计稿</span>
                             <span class="status-badge" id="sceneStatus">未生成</span>
                         </div>
-                        <div class="sheet-preview" id="scenePreview">
-                            <div class="placeholder">
-                                <span class="icon">🖼️</span>
-                                <p>点击下方按钮生成</p>
+                        <div class="sheet-preview" id="scenePreview"
+                            style="min-height: 200px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.2);">
+                            <div class="placeholder" style="text-align: center; color: var(--text-secondary);">
+                                <span style="font-size: 2rem;">🖼️</span>
+                                <p style="margin-top: 8px;">点击下方按钮生成</p>
                             </div>
                         </div>
-                        <button class="btn btn-primary" onclick="generateSceneSheet()">
-                            <span class="btn-icon">✨</span> 生成场景设计稿
-                        </button>
+                        <div class="prompt-section" style="padding: 15px;">
+                            <label
+                                style="font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; display: block;">📝
+                                提示词</label>
+                            <textarea id="scenePromptInput"
+                                style="width: 100%; min-height: 80px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); padding: 10px; resize: vertical; font-size: 13px;"
+                                onchange="updateSheetPrompt('scene_sheet_prompt', this.value)"></textarea>
+                        </div>
+                        <div style="padding: 0 15px 15px;">
+                            <button class="btn btn-primary" onclick="generateSceneSheet()" style="width: 100%;">
+                                <span class="btn-icon">✨</span> 生成场景设计稿
+                            </button>
+                        </div>
                     </div>
                 </div>
             </section>
