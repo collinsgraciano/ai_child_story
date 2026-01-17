@@ -17,7 +17,7 @@
             <button class="settings-btn" onclick="toggleSettings()" title="设置">⚙️</button>
         </header>
 
-        <!-- 设置面板 (伸缩展开) -->
+        <!-- 设置面板 (伸缩展开，可滚动) -->
         <div id="settingsPanel" class="settings-panel">
             <div class="settings-grid">
                 <!-- 图片 API 设置 -->
@@ -64,6 +64,23 @@
                     <div class="form-group">
                         <label for="referenceAudio">参考音频路径</label>
                         <input type="text" id="referenceAudio" placeholder="d:\path\to\ref.wav">
+                    </div>
+                </div>
+
+                <!-- 提示词优化 API 设置 -->
+                <div class="settings-column">
+                    <h3>✨ 提示词优化 API</h3>
+                    <div class="form-group">
+                        <label for="optimizeApiUrl">API 地址</label>
+                        <input type="text" id="optimizeApiUrl" placeholder="https://x666.me/v1">
+                    </div>
+                    <div class="form-group">
+                        <label for="optimizeApiKey">API 密钥</label>
+                        <input type="password" id="optimizeApiKey" placeholder="sk-xxx">
+                    </div>
+                    <div class="form-group">
+                        <label for="optimizeModel">模型名称</label>
+                        <input type="text" id="optimizeModel" placeholder="gpt-4.1-mini">
                     </div>
                 </div>
 
@@ -256,6 +273,9 @@
                         </button>
                         <button class="btn btn-secondary" onclick="generateProjectSRT()">
                             <span class="btn-icon">📝</span> 生成字幕 (SRT)
+                        </button>
+                        <button class="btn btn-secondary" onclick="optimizeAllVideoPrompts()">
+                            <span class="btn-icon">✨</span> 批量优化提示词
                         </button>
                     </div>
                 </div>

@@ -407,6 +407,72 @@ def test_image_api():
         })
 
 
+# ===== 视频提示词优化 API =====
+
+@app.route('/api/optimize/video-prompt', methods=['POST'])
+def optimize_video_prompt():
+    """使用 AI 优化视频提示词"""
+    import requests as req
+    
+    data = request.get_json()
+    page_index = data.get("page_index")
+    old_prompt = data.get("video_prompt", "")
+    eng_narration = data.get("eng_narration", "")
+    
+    if not old_prompt:
+        return jsonify({"success": False, "error": "视频提示词为空"})
+    
+    # 获取优化 API 配置
+    opt_config = config.to_dict().get("optimize_api", {})
+    base_url = opt_config.get("base_url", "").rstrip('/')
+    api_key = opt_config.get("api_key", "")
+    model = opt_config.get("model", "gpt-4.1-mini")
+    
+    if not base_url or not api_key:
+        return jsonify({"success": False, "error": "请先配置优化 API (optimize_api)"})
+    
+    # 构造请求
+    prompt_text = f'''根据下面旁白和视频提示词，在不改变故事大意的情况下，加上更多的细节，更合理的逻辑，优化修改润色生成新视频提示词，直接只输出新视频提示词，不要多余的解释：
+视频提示词：{old_prompt}
+旁白：{eng_narration}'''
+    
+    try:
+        resp = req.post(
+            f"{base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant that optimizes video prompts."},
+                    {"role": "user", "content": prompt_text}
+                ]
+            },
+            timeout=60
+        )
+        
+        if resp.status_code != 200:
+            return jsonify({"success": False, "error": f"API 错误: {resp.status_code}"})
+        
+        result = resp.json()
+        new_prompt = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        
+        if not new_prompt:
+            return jsonify({"success": False, "error": "优化结果为空"})
+        
+        return jsonify({
+            "success": True,
+            "old_prompt": old_prompt,
+            "new_prompt": new_prompt,
+            "page_index": page_index
+        })
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": f"优化失败: {str(e)}"})
+
+
 # ===== 页面路由 =====
 
 @app.route('/')

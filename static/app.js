@@ -333,6 +333,13 @@ function populateSettingsForm() {
         document.getElementById('referenceAudio').value = currentConfig.audio_api.reference_audio || '';
     }
 
+    // 优化 API
+    if (currentConfig.optimize_api) {
+        document.getElementById('optimizeApiUrl').value = currentConfig.optimize_api.base_url || '';
+        document.getElementById('optimizeApiKey').value = currentConfig.optimize_api.api_key || '';
+        document.getElementById('optimizeModel').value = currentConfig.optimize_api.model || '';
+    }
+
     // 默认值处理
     document.getElementById('batchSize').value = currentConfig.generation.batch_size || 1;
 
@@ -371,6 +378,11 @@ async function saveSettings() {
         audio_api: {
             base_url: document.getElementById('audioApiUrl').value.trim(),
             reference_audio: document.getElementById('referenceAudio').value.trim()
+        },
+        optimize_api: {
+            base_url: document.getElementById('optimizeApiUrl').value.trim(),
+            api_key: document.getElementById('optimizeApiKey').value.trim(),
+            model: document.getElementById('optimizeModel').value.trim()
         },
         generation: {
             batch_size: parseInt(document.getElementById('batchSize').value) || 1,
@@ -843,6 +855,193 @@ async function updatePrompt(pageIndex, promptType, newValue) {
 }
 
 
+// ===== 视频提示词历史 (用于撤销) =====
+const videoPromptHistory = {}; // {pageIndex: oldPrompt}
+
+// ===== 优化视频提示词 =====
+async function optimizeVideoPrompt(pageIndex) {
+    const page = storyData.script.find(p => p.page_index === pageIndex);
+    if (!page) return;
+
+    const oldPrompt = page.video_prompt || '';
+    const engNarration = page.eng_narration || '';
+
+    if (!oldPrompt) {
+        showToast('请先填写视频提示词', 'error');
+        return;
+    }
+
+    const optBtn = document.getElementById(`opt-btn-${pageIndex}`);
+    const undoBtn = document.getElementById(`undo-btn-${pageIndex}`);
+    const textarea = document.getElementById(`video-prompt-${pageIndex}`);
+
+    if (optBtn) {
+        optBtn.disabled = true;
+        optBtn.textContent = '⏳ 优化中...';
+    }
+
+    try {
+        const response = await fetch('/api/optimize/video-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                page_index: pageIndex,
+                video_prompt: oldPrompt,
+                eng_narration: engNarration
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // 保存旧版本用于撤销
+            videoPromptHistory[pageIndex] = oldPrompt;
+
+            // 更新 UI
+            if (textarea) {
+                textarea.value = result.new_prompt;
+            }
+
+            // 更新本地数据
+            page.video_prompt = result.new_prompt;
+
+            // 保存到后端
+            await updatePrompt(pageIndex, 'video_prompt', result.new_prompt);
+
+            // 显示撤销按钮
+            if (undoBtn) {
+                undoBtn.style.display = 'inline-block';
+            }
+
+            showToast('✨ 视频提示词优化成功', 'success');
+        } else {
+            showToast('优化失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('网络错误: ' + error.message, 'error');
+    } finally {
+        if (optBtn) {
+            optBtn.disabled = false;
+            optBtn.textContent = '✨ 优化';
+        }
+    }
+}
+
+// ===== 撤销视频提示词优化 =====
+async function undoVideoPrompt(pageIndex) {
+    const oldPrompt = videoPromptHistory[pageIndex];
+    if (!oldPrompt) {
+        showToast('没有可撤销的历史', 'error');
+        return;
+    }
+
+    const page = storyData.script.find(p => p.page_index === pageIndex);
+    if (!page) return;
+
+    const textarea = document.getElementById(`video-prompt-${pageIndex}`);
+    const undoBtn = document.getElementById(`undo-btn-${pageIndex}`);
+
+    // 更新 UI
+    if (textarea) {
+        textarea.value = oldPrompt;
+    }
+
+    // 更新本地数据
+    page.video_prompt = oldPrompt;
+
+    // 保存到后端
+    await updatePrompt(pageIndex, 'video_prompt', oldPrompt);
+
+    // 隐藏撤销按钮
+    if (undoBtn) {
+        undoBtn.style.display = 'none';
+    }
+
+    // 清除历史
+    delete videoPromptHistory[pageIndex];
+
+    showToast('↩️ 已恢复上一版本', 'success');
+}
+
+// ===== 已优化标记集合 =====
+const optimizedPrompts = new Set(); // 存储已优化的页面索引
+
+// ===== 批量优化所有未优化的视频提示词 =====
+async function optimizeAllVideoPrompts() {
+    if (!storyData || !storyData.script) {
+        showToast('请先加载故事数据', 'error');
+        return;
+    }
+
+    // 找出未优化的页面
+    const pending = storyData.script.filter(page =>
+        page.video_prompt && !optimizedPrompts.has(page.page_index)
+    );
+
+    if (pending.length === 0) {
+        showToast('所有视频提示词都已优化过', 'info');
+        return;
+    }
+
+    if (!confirm(`将优化 ${pending.length} 个未优化的视频提示词。是否继续？`)) {
+        return;
+    }
+
+    updateProgress(`开始批量优化 ${pending.length} 个视频提示词...`);
+
+    let success = 0, failed = 0;
+
+    for (const page of pending) {
+        const pageIndex = page.page_index;
+        updateProgress(`正在优化第 ${pageIndex} 页... (${success + failed + 1}/${pending.length})`);
+
+        try {
+            const response = await fetch('/api/optimize/video-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    page_index: pageIndex,
+                    video_prompt: page.video_prompt,
+                    eng_narration: page.eng_narration || ''
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // 保存旧版本
+                videoPromptHistory[pageIndex] = page.video_prompt;
+
+                // 更新数据
+                page.video_prompt = result.new_prompt;
+
+                // 更新 UI
+                const textarea = document.getElementById(`video-prompt-${pageIndex}`);
+                const undoBtn = document.getElementById(`undo-btn-${pageIndex}`);
+                if (textarea) textarea.value = result.new_prompt;
+                if (undoBtn) undoBtn.style.display = 'inline-block';
+
+                // 保存到后端
+                await updatePrompt(pageIndex, 'video_prompt', result.new_prompt);
+
+                // 标记为已优化
+                optimizedPrompts.add(pageIndex);
+
+                success++;
+            } else {
+                console.error(`优化第 ${pageIndex} 页失败:`, result.error);
+                failed++;
+            }
+        } catch (error) {
+            console.error(`优化第 ${pageIndex} 页出错:`, error);
+            failed++;
+        }
+    }
+
+    updateProgress(`✅ 批量优化完成: ${success} 成功, ${failed} 失败`);
+    showToast(`✨ 批量优化完成: ${success} 成功, ${failed} 失败`, success > 0 ? 'success' : 'error');
+}
+
 
 // ===== 一键生成所有图片 =====
 // function generateAllSequential removed (replaced by generateAllImages)
@@ -922,12 +1121,20 @@ function createPageCard(page) {
             </div>
         </div>
         
-        <!-- 4. 视频提示词 (可编辑) -->
+        <!-- 4. 视频提示词 (可编辑 + 优化按钮) -->
         <div class="prompt-section video-prompt-section">
-            <div class="prompt-header">
+            <div class="prompt-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <span class="prompt-label">🎬 视频提示词</span>
+                <div style="display: flex; gap: 5px;">
+                    <button class="btn btn-secondary btn-xs" onclick="optimizeVideoPrompt(${page.page_index})" id="opt-btn-${page.page_index}">
+                        ✨ 优化
+                    </button>
+                    <button class="btn btn-secondary btn-xs" onclick="undoVideoPrompt(${page.page_index})" id="undo-btn-${page.page_index}" style="display: none;">
+                        ↩️ 撤销
+                    </button>
+                </div>
             </div>
-             <textarea class="prompt-input" 
+             <textarea class="prompt-input" id="video-prompt-${page.page_index}"
                       onchange="updatePrompt(${page.page_index}, 'video_prompt', this.value)"
                       placeholder="在此输入视频提示词...">${(page.video_prompt || '').replace(/</g, '&lt;')}</textarea>
         </div>

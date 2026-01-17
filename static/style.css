@@ -719,17 +719,19 @@ body {
 .settings-panel {
     background: var(--bg-card);
     border-radius: var(--radius-lg);
-    margin-bottom: 20px;
+    margin-bottom: 0;
     border: 1px solid var(--border-color);
     overflow: hidden;
     max-height: 0;
     opacity: 0;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: var(--shadow-lg);
+    padding: 0;
 }
 
 .settings-panel.expanded {
-    max-height: 600px;
+    max-height: 70vh;
+    overflow-y: auto;
     opacity: 1;
     margin-top: -20px;
     /* 紧贴 Header 下方 */

@@ -28,6 +28,11 @@ class Config:
             "base_url": "https://11111.gradio.live",
             "reference_audio": "d:\\gemini\\child_story\\10s.mp3"
         },
+        "optimize_api": {
+            "base_url": "https://x666.me/v1",
+            "api_key": "sk-NXZmDCUXqz5zAsrC6nHePGrfe62vSiyGEVBw3OwHoHtvd8Mj",
+            "model": "gpt-4.1-mini"
+        },
         "generation": {
             "image_size": "1024x1024",
             "image_max_retries": 3,
