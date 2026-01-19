@@ -27,10 +27,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadConfig();
     loadProjects();  // 加载项目列表
     loadStyles();    // [NEW] 加载风格列表
+    setupSettingsAutoSave(); // [NEW] 设置自动保存
 
     // 定期刷新状态
     setInterval(refreshStatus, 5000);
 });
+
+// ===== 设置自动保存 =====
+function setupSettingsAutoSave() {
+    const settingsPanel = document.getElementById('settingsPanel');
+    if (!settingsPanel) return;
+
+    // 为所有 input 和 textarea 添加自动保存
+    const inputs = settingsPanel.querySelectorAll('input, textarea');
+    inputs.forEach(input => {
+        input.addEventListener('input', debouncedSaveSettings);
+        input.addEventListener('change', debouncedSaveSettings);
+    });
+
+    console.log(`[Settings] Auto-save bound to ${inputs.length} inputs`);
+}
 
 // ===== 风格管理 =====
 let currentStyleName = null;
@@ -56,6 +72,32 @@ async function loadStyles() {
                 select.value = result.current_style;
                 currentStyleName = result.current_style;
                 updateStylePreview(result.styles.find(s => s.name === result.current_style));
+            }
+
+            // [NEW] 同时填充设置中的默认风格下拉框
+            const defaultStyleSelect = document.getElementById('defaultStyle');
+            if (defaultStyleSelect) {
+                defaultStyleSelect.innerHTML = '<option value="">-- 无默认风格 --</option>';
+                result.styles.forEach(style => {
+                    const option = document.createElement('option');
+                    option.value = style.name;
+                    option.textContent = style.name;
+                    defaultStyleSelect.appendChild(option);
+                });
+
+                // 读取配置中的默认风格并选中
+                const configDefaultStyle = currentConfig?.generation?.default_style || '';
+                if (configDefaultStyle) {
+                    defaultStyleSelect.value = configDefaultStyle;
+                    // 如果当前没有选中风格，且有默认风格，则应用默认风格
+                    if (!currentStyleName && result.styles.find(s => s.name === configDefaultStyle)) {
+                        select.value = configDefaultStyle;
+                        currentStyleName = configDefaultStyle;
+                        updateStylePreview(result.styles.find(s => s.name === configDefaultStyle));
+                        // 同步到后端
+                        selectStyle(configDefaultStyle);
+                    }
+                }
             }
         }
     } catch (error) {
@@ -338,6 +380,8 @@ function populateSettingsForm() {
         document.getElementById('optimizeApiUrl').value = currentConfig.optimize_api.base_url || '';
         document.getElementById('optimizeApiKey').value = currentConfig.optimize_api.api_key || '';
         document.getElementById('optimizeModel').value = currentConfig.optimize_api.model || '';
+        document.getElementById('imagePromptTemplate').value = currentConfig.optimize_api.image_prompt_template || '';
+        document.getElementById('videoPromptTemplate').value = currentConfig.optimize_api.video_prompt_template || '';
     }
 
     // 默认值处理
@@ -362,8 +406,19 @@ function toggleSettings() {
 
 }
 
+// ===== 防抖函数用于自动保存 =====
+let saveSettingsTimeout = null;
+function debouncedSaveSettings() {
+    if (saveSettingsTimeout) {
+        clearTimeout(saveSettingsTimeout);
+    }
+    saveSettingsTimeout = setTimeout(() => {
+        saveSettings(true); // 静默保存模式
+    }, 500); // 500ms 防抖
+}
+
 // ===== 保存设置 =====
-async function saveSettings() {
+async function saveSettings(silent = false) {
     const newConfig = {
         image_api: {
             base_url: document.getElementById('imageApiUrl').value.trim(),
@@ -382,11 +437,14 @@ async function saveSettings() {
         optimize_api: {
             base_url: document.getElementById('optimizeApiUrl').value.trim(),
             api_key: document.getElementById('optimizeApiKey').value.trim(),
-            model: document.getElementById('optimizeModel').value.trim()
+            model: document.getElementById('optimizeModel').value.trim(),
+            image_prompt_template: document.getElementById('imagePromptTemplate').value.trim(),
+            video_prompt_template: document.getElementById('videoPromptTemplate').value.trim()
         },
         generation: {
             batch_size: parseInt(document.getElementById('batchSize').value) || 1,
             image_max_retries: parseInt(document.getElementById('imageMaxRetries').value) ?? 3,
+            default_style: document.getElementById('defaultStyle').value || '',  // [NEW]
             concurrency: {
                 image: parseInt(document.getElementById('concurrencyImage').value) || 2,
                 video: parseInt(document.getElementById('concurrencyVideo').value) || 1
@@ -395,7 +453,9 @@ async function saveSettings() {
     };
 
     try {
-        updateProgress('正在保存设置...');
+        if (!silent) {
+            updateProgress('正在保存设置...');
+        }
 
         const response = await fetch('/api/config', {
             method: 'POST',
@@ -407,15 +467,24 @@ async function saveSettings() {
 
         if (result.success) {
             currentConfig = result.config;
-            showToast('设置已保存', 'success');
-            // 自动收起
-            document.getElementById('settingsPanel').classList.remove('expanded');
-            updateProgress('设置保存成功');
+            if (!silent) {
+                showToast('设置已保存', 'success');
+                // 手动保存时收起面板
+                document.getElementById('settingsPanel').classList.remove('expanded');
+                updateProgress('设置保存成功');
+            } else {
+                // 静默保存时只显示简短提示
+                console.log('[Settings] Auto-saved');
+            }
         } else {
             showToast('保存失败: ' + result.error, 'error');
         }
     } catch (error) {
-        showToast('网络错误: ' + error.message, 'error');
+        if (!silent) {
+            showToast('网络错误: ' + error.message, 'error');
+        } else {
+            console.error('[Settings] Auto-save failed:', error);
+        }
     }
 }
 
@@ -471,7 +540,13 @@ async function generateAllVideos() {
             continue;
         }
 
+        // [NEW] 当并发 >= 2 时，添加 3 秒错开延迟
+        const delayMs = concurrency >= 2 ? count * 3000 : 0;
+
         queue.add(async () => {
+            if (delayMs > 0) {
+                await new Promise(r => setTimeout(r, delayMs));
+            }
             updateProgress(`正在请求第 ${pageIndex} 页视频...`);
             await generatePageVideo(pageIndex);
         });
@@ -865,6 +940,7 @@ async function optimizeVideoPrompt(pageIndex) {
 
     const oldPrompt = page.video_prompt || '';
     const engNarration = page.eng_narration || '';
+    const imagePrompt = page.image_prompt || '';  // [NEW] 参考图片提示词
 
     if (!oldPrompt) {
         showToast('请先填写视频提示词', 'error');
@@ -887,6 +963,7 @@ async function optimizeVideoPrompt(pageIndex) {
             body: JSON.stringify({
                 page_index: pageIndex,
                 video_prompt: oldPrompt,
+                image_prompt: imagePrompt,  // [NEW]
                 eng_narration: engNarration
             })
         });
@@ -1002,6 +1079,7 @@ async function optimizeAllVideoPrompts() {
                 body: JSON.stringify({
                     page_index: pageIndex,
                     video_prompt: page.video_prompt,
+                    image_prompt: page.image_prompt || '',  // [NEW]
                     eng_narration: page.eng_narration || ''
                 })
             });
@@ -1040,6 +1118,199 @@ async function optimizeAllVideoPrompts() {
 
     updateProgress(`✅ 批量优化完成: ${success} 成功, ${failed} 失败`);
     showToast(`✨ 批量优化完成: ${success} 成功, ${failed} 失败`, success > 0 ? 'success' : 'error');
+}
+
+
+// ===== 图片提示词历史 (用于撤销) =====
+const imagePromptHistory = {}; // {pageIndex: oldPrompt}
+const optimizedImagePrompts = new Set(); // 存储已优化的页面索引
+
+// ===== 优化图片提示词 =====
+async function optimizeImagePrompt(pageIndex) {
+    const page = storyData.script.find(p => p.page_index === pageIndex);
+    if (!page) return;
+
+    const oldPrompt = page.image_prompt || '';
+    const engNarration = page.eng_narration || '';
+    const videoPrompt = page.video_prompt || '';  // [NEW] 参考视频提示词
+
+    if (!oldPrompt) {
+        showToast('请先填写图片提示词', 'error');
+        return;
+    }
+
+    const optBtn = document.getElementById(`img-opt-btn-${pageIndex}`);
+    const undoBtn = document.getElementById(`img-undo-btn-${pageIndex}`);
+    const textarea = document.getElementById(`image-prompt-${pageIndex}`);
+
+    if (optBtn) {
+        optBtn.disabled = true;
+        optBtn.textContent = '⏳ 优化中...';
+    }
+
+    try {
+        const response = await fetch('/api/optimize/image-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                page_index: pageIndex,
+                image_prompt: oldPrompt,
+                video_prompt: videoPrompt,  // [NEW]
+                eng_narration: engNarration
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // 保存旧版本用于撤销
+            imagePromptHistory[pageIndex] = oldPrompt;
+
+            // 更新 UI
+            if (textarea) {
+                textarea.value = result.new_prompt;
+            }
+
+            // 更新本地数据
+            page.image_prompt = result.new_prompt;
+
+            // 保存到后端
+            await updatePrompt(pageIndex, 'image_prompt', result.new_prompt);
+
+            // 标记为已优化
+            optimizedImagePrompts.add(pageIndex);
+
+            // 显示撤销按钮
+            if (undoBtn) {
+                undoBtn.style.display = 'inline-block';
+            }
+
+            showToast('✨ 图片提示词优化成功', 'success');
+        } else {
+            showToast('优化失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('网络错误: ' + error.message, 'error');
+    } finally {
+        if (optBtn) {
+            optBtn.disabled = false;
+            optBtn.textContent = '✨ 优化';
+        }
+    }
+}
+
+// ===== 撤销图片提示词优化 =====
+async function undoImagePrompt(pageIndex) {
+    const oldPrompt = imagePromptHistory[pageIndex];
+    if (!oldPrompt) {
+        showToast('没有可撤销的历史', 'error');
+        return;
+    }
+
+    const page = storyData.script.find(p => p.page_index === pageIndex);
+    if (!page) return;
+
+    const textarea = document.getElementById(`image-prompt-${pageIndex}`);
+    const undoBtn = document.getElementById(`img-undo-btn-${pageIndex}`);
+
+    // 更新 UI
+    if (textarea) {
+        textarea.value = oldPrompt;
+    }
+
+    // 更新本地数据
+    page.image_prompt = oldPrompt;
+
+    // 保存到后端
+    await updatePrompt(pageIndex, 'image_prompt', oldPrompt);
+
+    // 隐藏撤销按钮
+    if (undoBtn) {
+        undoBtn.style.display = 'none';
+    }
+
+    // 清除历史和已优化标记
+    delete imagePromptHistory[pageIndex];
+    optimizedImagePrompts.delete(pageIndex);
+
+    showToast('↩️ 已恢复上一版本', 'success');
+}
+
+// ===== 批量优化所有未优化的图片提示词 =====
+async function optimizeAllImagePrompts() {
+    if (!storyData || !storyData.script) {
+        showToast('请先加载故事数据', 'error');
+        return;
+    }
+
+    // 找出未优化的页面
+    const pending = storyData.script.filter(page =>
+        page.image_prompt && !optimizedImagePrompts.has(page.page_index)
+    );
+
+    if (pending.length === 0) {
+        showToast('所有图片提示词都已优化过', 'info');
+        return;
+    }
+
+    if (!confirm(`将优化 ${pending.length} 个未优化的图片提示词。是否继续？`)) {
+        return;
+    }
+
+    updateProgress(`开始批量优化 ${pending.length} 个图片提示词...`);
+
+    let success = 0, failed = 0;
+
+    for (const page of pending) {
+        const pageIndex = page.page_index;
+        updateProgress(`正在优化图片提示词 第 ${pageIndex} 页... (${success + failed + 1}/${pending.length})`);
+
+        try {
+            const response = await fetch('/api/optimize/image-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    page_index: pageIndex,
+                    image_prompt: page.image_prompt,
+                    video_prompt: page.video_prompt || '',  // [NEW]
+                    eng_narration: page.eng_narration || ''
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // 保存旧版本
+                imagePromptHistory[pageIndex] = page.image_prompt;
+
+                // 更新数据
+                page.image_prompt = result.new_prompt;
+
+                // 更新 UI
+                const textarea = document.getElementById(`image-prompt-${pageIndex}`);
+                const undoBtn = document.getElementById(`img-undo-btn-${pageIndex}`);
+                if (textarea) textarea.value = result.new_prompt;
+                if (undoBtn) undoBtn.style.display = 'inline-block';
+
+                // 保存到后端
+                await updatePrompt(pageIndex, 'image_prompt', result.new_prompt);
+
+                // 标记为已优化
+                optimizedImagePrompts.add(pageIndex);
+
+                success++;
+            } else {
+                console.error(`优化第 ${pageIndex} 页图片提示词失败:`, result.error);
+                failed++;
+            }
+        } catch (error) {
+            console.error(`优化第 ${pageIndex} 页图片提示词出错:`, error);
+            failed++;
+        }
+    }
+
+    updateProgress(`✅ 图片提示词批量优化完成: ${success} 成功, ${failed} 失败`);
+    showToast(`✨ 图片提示词批量优化完成: ${success} 成功, ${failed} 失败`, success > 0 ? 'success' : 'error');
 }
 
 
@@ -1103,12 +1374,20 @@ function createPageCard(page) {
             </div>
         </div>
         
-        <!-- 2. 图片提示词 (可编辑) -->
+        <!-- 2. 图片提示词 (可编辑 + 优化按钮) -->
         <div class="prompt-section image-prompt-section">
-            <div class="prompt-header">
+            <div class="prompt-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <span class="prompt-label">📷 图片提示词</span>
+                <div style="display: flex; gap: 5px;">
+                    <button class="btn btn-secondary btn-xs" onclick="optimizeImagePrompt(${page.page_index})" id="img-opt-btn-${page.page_index}">
+                        ✨ 优化
+                    </button>
+                    <button class="btn btn-secondary btn-xs" onclick="undoImagePrompt(${page.page_index})" id="img-undo-btn-${page.page_index}" style="display: none;">
+                        ↩️ 撤销
+                    </button>
+                </div>
             </div>
-            <textarea class="prompt-input" 
+            <textarea class="prompt-input" id="image-prompt-${page.page_index}"
                       onchange="updatePrompt(${page.page_index}, 'image_prompt', this.value)"
                       placeholder="在此输入图片提示词...">${(page.image_prompt || '').replace(/</g, '&lt;')}</textarea>
         </div>

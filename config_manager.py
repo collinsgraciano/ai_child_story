@@ -31,7 +31,9 @@ class Config:
         "optimize_api": {
             "base_url": "https://x666.me/v1",
             "api_key": "sk-NXZmDCUXqz5zAsrC6nHePGrfe62vSiyGEVBw3OwHoHtvd8Mj",
-            "model": "gpt-4.1-mini"
+            "model": "gpt-4.1-mini",
+            "image_prompt_template": "根据下面旁白和图片提示词，在不改变故事大意的情况下，加上更多的视觉细节、场景描述和艺术风格，优化修改润色生成新图片提示词，直接只输出新图片提示词，不要多余的解释：\n图片提示词：{prompt}\n旁白：{narration}",
+            "video_prompt_template": "根据下面旁白和视频提示词，在不改变故事大意的情况下，加上更多的细节，更合理的逻辑，优化修改润色生成新视频提示词，直接只输出新视频提示词，不要多余的解释：\n视频提示词：{prompt}\n旁白：{narration}"
         },
         "generation": {
             "image_size": "1024x1024",
@@ -39,6 +41,7 @@ class Config:
             "video_max_retries": 10,
             "download_timeout": 120,
             "batch_size": 1,
+            "default_style": "",  # [NEW] 默认风格名称
             "concurrency": {
                 "image": 2,
                 "video": 1

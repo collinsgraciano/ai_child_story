@@ -82,6 +82,20 @@
                         <label for="optimizeModel">模型名称</label>
                         <input type="text" id="optimizeModel" placeholder="gpt-4.1-mini">
                     </div>
+                    <div class="form-group">
+                        <label for="imagePromptTemplate">图片优化提示模板</label>
+                        <textarea id="imagePromptTemplate" rows="3" placeholder="使用 {prompt} 和 {narration} 作为占位符"
+                            style="width: 100%; min-height: 60px; resize: vertical;"></textarea>
+                        <small style="color: var(--text-secondary); display: block; margin-top: 4px;">{prompt} = 原始提示词,
+                            {narration} = 旁白</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="videoPromptTemplate">视频优化提示模板</label>
+                        <textarea id="videoPromptTemplate" rows="3" placeholder="使用 {prompt} 和 {narration} 作为占位符"
+                            style="width: 100%; min-height: 60px; resize: vertical;"></textarea>
+                        <small style="color: var(--text-secondary); display: block; margin-top: 4px;">{prompt} = 原始提示词,
+                            {narration} = 旁白</small>
+                    </div>
                 </div>
 
                 <!-- 生成配置 -->
@@ -110,6 +124,14 @@
                         <input type="number" id="imageMaxRetries" min="0" max="10" value="3" placeholder="默认: 3">
                         <small
                             style="color: var(--text-secondary); display: block; margin-top: 4px;">图片生成失败后的重试次数。</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="defaultStyle">默认风格</label>
+                        <select id="defaultStyle" style="width: 100%;">
+                            <option value="">-- 无默认风格 --</option>
+                        </select>
+                        <small
+                            style="color: var(--text-secondary); display: block; margin-top: 4px;">启动时自动选择的风格参考。</small>
                     </div>
                 </div>
             </div>
@@ -275,7 +297,10 @@
                             <span class="btn-icon">📝</span> 生成字幕 (SRT)
                         </button>
                         <button class="btn btn-secondary" onclick="optimizeAllVideoPrompts()">
-                            <span class="btn-icon">✨</span> 批量优化提示词
+                            <span class="btn-icon">✨</span> 批量优化视频提示词
+                        </button>
+                        <button class="btn btn-secondary" onclick="optimizeAllImagePrompts()">
+                            <span class="btn-icon">🎨</span> 批量优化图片提示词
                         </button>
                     </div>
                 </div>

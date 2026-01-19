@@ -249,6 +249,21 @@ def update_config():
                 default_ref_audio=config.get("audio_api", "reference_audio")
             )
         
+        # 更新优化 API 配置
+        if "optimize_api" in data:
+            opt_cfg = data["optimize_api"]
+            # 直接更新整个 optimize_api 部分
+            current_opt = config.config.get("optimize_api", {})
+            current_opt.update({
+                "base_url": opt_cfg.get("base_url", current_opt.get("base_url", "")),
+                "api_key": opt_cfg.get("api_key", current_opt.get("api_key", "")),
+                "model": opt_cfg.get("model", current_opt.get("model", "")),
+                "image_prompt_template": opt_cfg.get("image_prompt_template", current_opt.get("image_prompt_template", "")),
+                "video_prompt_template": opt_cfg.get("video_prompt_template", current_opt.get("video_prompt_template", ""))
+            })
+            config.config["optimize_api"] = current_opt
+            config.save_config()
+        
         # 更新其他配置
         if "generation" in data:
             for key, value in data["generation"].items():
@@ -418,6 +433,7 @@ def optimize_video_prompt():
     page_index = data.get("page_index")
     old_prompt = data.get("video_prompt", "")
     eng_narration = data.get("eng_narration", "")
+    image_prompt = data.get("image_prompt", "")  # [NEW] 参考图片提示词
     
     if not old_prompt:
         return jsonify({"success": False, "error": "视频提示词为空"})
@@ -431,10 +447,10 @@ def optimize_video_prompt():
     if not base_url or not api_key:
         return jsonify({"success": False, "error": "请先配置优化 API (optimize_api)"})
     
-    # 构造请求
-    prompt_text = f'''根据下面旁白和视频提示词，在不改变故事大意的情况下，加上更多的细节，更合理的逻辑，优化修改润色生成新视频提示词，直接只输出新视频提示词，不要多余的解释：
-视频提示词：{old_prompt}
-旁白：{eng_narration}'''
+    # 使用自定义模板或默认模板
+    default_template = "根据下面旁白、图片提示词和视频提示词，在不改变故事大意的情况下，加上更多的细节，更合理的逻辑，优化修改润色生成新视频提示词，直接只输出新视频提示词，不要多余的解释：\n视频提示词：{prompt}\n图片提示词：{image_prompt}\n旁白：{narration}"
+    template = opt_config.get("video_prompt_template", "") or default_template
+    prompt_text = template.replace("{prompt}", old_prompt).replace("{narration}", eng_narration).replace("{image_prompt}", image_prompt)
     
     try:
         resp = req.post(
@@ -472,6 +488,70 @@ def optimize_video_prompt():
     except Exception as e:
         return jsonify({"success": False, "error": f"优化失败: {str(e)}"})
 
+
+@app.route('/api/optimize/image-prompt', methods=['POST'])
+def optimize_image_prompt():
+    """使用 AI 优化图片提示词"""
+    import requests as req
+    
+    data = request.get_json()
+    page_index = data.get("page_index")
+    old_prompt = data.get("image_prompt", "")
+    eng_narration = data.get("eng_narration", "")
+    video_prompt = data.get("video_prompt", "")  # [NEW] 参考视频提示词
+    
+    if not old_prompt:
+        return jsonify({"success": False, "error": "图片提示词为空"})
+    
+    # 获取优化 API 配置
+    opt_config = config.to_dict().get("optimize_api", {})
+    base_url = opt_config.get("base_url", "").rstrip('/')
+    api_key = opt_config.get("api_key", "")
+    model = opt_config.get("model", "gpt-4.1-mini")
+    
+    if not base_url or not api_key:
+        return jsonify({"success": False, "error": "请先配置优化 API (optimize_api)"})
+    
+    # 使用自定义模板或默认模板
+    default_template = "根据下面旁白、视频提示词和图片提示词，在不改变故事大意的情况下，加上更多的视觉细节、场景描述和艺术风格，优化修改润色生成新图片提示词，直接只输出新图片提示词，不要多余的解释：\n图片提示词：{prompt}\n视频提示词：{video_prompt}\n旁白：{narration}"
+    template = opt_config.get("image_prompt_template", "") or default_template
+    prompt_text = template.replace("{prompt}", old_prompt).replace("{narration}", eng_narration).replace("{video_prompt}", video_prompt)
+    
+    try:
+        resp = req.post(
+            f"{base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant that optimizes image generation prompts for better visual quality."},
+                    {"role": "user", "content": prompt_text}
+                ]
+            },
+            timeout=60
+        )
+        
+        if resp.status_code != 200:
+            return jsonify({"success": False, "error": f"API 错误: {resp.status_code}"})
+        
+        result = resp.json()
+        new_prompt = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        
+        if not new_prompt:
+            return jsonify({"success": False, "error": "优化结果为空"})
+        
+        return jsonify({
+            "success": True,
+            "old_prompt": old_prompt,
+            "new_prompt": new_prompt,
+            "page_index": page_index
+        })
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": f"优化失败: {str(e)}"})
 
 # ===== 页面路由 =====
 
