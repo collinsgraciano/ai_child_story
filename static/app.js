@@ -207,6 +207,10 @@ async function deleteCurrentStyle() {
     }
 }
 
+// ===== 原始提示词存储 (用于恢复原版) =====
+const originalImagePrompts = {}; // {pageIndex: originalPrompt}
+const originalVideoPrompts = {}; // {pageIndex: originalPrompt}
+
 // ===== 加载故事数据 =====
 async function loadStory() {
     try {
@@ -215,6 +219,15 @@ async function loadStory() {
 
         if (result.success) {
             storyData = result.data;
+
+            // [NEW] 保存原始提示词
+            if (storyData && storyData.script) {
+                storyData.script.forEach(page => {
+                    originalImagePrompts[page.page_index] = page.image_prompt || '';
+                    originalVideoPrompts[page.page_index] = page.video_prompt || '';
+                });
+            }
+
             updateHeader();
             renderPages();
             refreshStatus();
@@ -1040,6 +1053,41 @@ async function undoVideoPrompt(pageIndex) {
     showToast('↩️ 已恢复上一版本', 'success');
 }
 
+// ===== 恢复原始视频提示词 =====
+async function restoreOriginalVideoPrompt(pageIndex) {
+    const originalPrompt = originalVideoPrompts[pageIndex];
+    if (!originalPrompt) {
+        showToast('没有原始版本', 'error');
+        return;
+    }
+
+    const page = storyData.script.find(p => p.page_index === pageIndex);
+    if (!page) return;
+
+    const textarea = document.getElementById(`video-prompt-${pageIndex}`);
+    const undoBtn = document.getElementById(`undo-btn-${pageIndex}`);
+
+    // 更新 UI
+    if (textarea) {
+        textarea.value = originalPrompt;
+    }
+
+    // 更新本地数据
+    page.video_prompt = originalPrompt;
+
+    // 保存到后端
+    await updatePrompt(pageIndex, 'video_prompt', originalPrompt);
+
+    // 隐藏撤销按钮并清除历史
+    if (undoBtn) {
+        undoBtn.style.display = 'none';
+    }
+    delete videoPromptHistory[pageIndex];
+    optimizedPrompts.delete(pageIndex);
+
+    showToast('🔄 已恢复原始版本', 'success');
+}
+
 // ===== 已优化标记集合 =====
 const optimizedPrompts = new Set(); // 存储已优化的页面索引
 
@@ -1236,6 +1284,41 @@ async function undoImagePrompt(pageIndex) {
     showToast('↩️ 已恢复上一版本', 'success');
 }
 
+// ===== 恢复原始图片提示词 =====
+async function restoreOriginalImagePrompt(pageIndex) {
+    const originalPrompt = originalImagePrompts[pageIndex];
+    if (!originalPrompt) {
+        showToast('没有原始版本', 'error');
+        return;
+    }
+
+    const page = storyData.script.find(p => p.page_index === pageIndex);
+    if (!page) return;
+
+    const textarea = document.getElementById(`image-prompt-${pageIndex}`);
+    const undoBtn = document.getElementById(`img-undo-btn-${pageIndex}`);
+
+    // 更新 UI
+    if (textarea) {
+        textarea.value = originalPrompt;
+    }
+
+    // 更新本地数据
+    page.image_prompt = originalPrompt;
+
+    // 保存到后端
+    await updatePrompt(pageIndex, 'image_prompt', originalPrompt);
+
+    // 隐藏撤销按钮并清除历史
+    if (undoBtn) {
+        undoBtn.style.display = 'none';
+    }
+    delete imagePromptHistory[pageIndex];
+    optimizedImagePrompts.delete(pageIndex);
+
+    showToast('🔄 已恢复原始版本', 'success');
+}
+
 // ===== 批量优化所有未优化的图片提示词 =====
 async function optimizeAllImagePrompts() {
     if (!storyData || !storyData.script) {
@@ -1385,6 +1468,9 @@ function createPageCard(page) {
                     <button class="btn btn-secondary btn-xs" onclick="undoImagePrompt(${page.page_index})" id="img-undo-btn-${page.page_index}" style="display: none;">
                         ↩️ 撤销
                     </button>
+                    <button class="btn btn-secondary btn-xs" onclick="restoreOriginalImagePrompt(${page.page_index})" title="恢复原始版本">
+                        🔄 原版
+                    </button>
                 </div>
             </div>
             <textarea class="prompt-input" id="image-prompt-${page.page_index}"
@@ -1410,6 +1496,9 @@ function createPageCard(page) {
                     </button>
                     <button class="btn btn-secondary btn-xs" onclick="undoVideoPrompt(${page.page_index})" id="undo-btn-${page.page_index}" style="display: none;">
                         ↩️ 撤销
+                    </button>
+                    <button class="btn btn-secondary btn-xs" onclick="restoreOriginalVideoPrompt(${page.page_index})" title="恢复原始版本">
+                        🔄 原版
                     </button>
                 </div>
             </div>
