@@ -408,7 +408,15 @@ function populateSettingsForm() {
     // 图片重试次数
     document.getElementById('imageMaxRetries').value = currentConfig.generation.image_max_retries ?? 3;
 
+    // 视频后处理配置
+    const postProcessing = currentConfig.video_post_processing || {};
+    document.getElementById('sceneThreshold').value = postProcessing.scene_threshold ?? 27.0;
+    document.getElementById('videoVolume').value = postProcessing.video_volume ?? 0.05;
+    document.getElementById('audioVolume').value = postProcessing.audio_volume ?? 4.0;
+    document.getElementById('skipFirstScene').checked = postProcessing.skip_first_scene !== false;
+
     console.log(`[Config] Loaded concurrency: Image=${concurrency.image}, Video=${concurrency.video}`);
+    console.log(`[Config] Loaded post processing: threshold=${postProcessing.scene_threshold}, video_vol=${postProcessing.video_volume}, audio_vol=${postProcessing.audio_volume}`);
 }
 
 // ===== 切换设置面板 =====
@@ -462,6 +470,12 @@ async function saveSettings(silent = false) {
                 image: parseInt(document.getElementById('concurrencyImage').value) || 2,
                 video: parseInt(document.getElementById('concurrencyVideo').value) || 1
             }
+        },
+        video_post_processing: {
+            scene_threshold: parseFloat(document.getElementById('sceneThreshold').value) || 27.0,
+            video_volume: parseFloat(document.getElementById('videoVolume').value) || 0.05,
+            audio_volume: parseFloat(document.getElementById('audioVolume').value) || 4.0,
+            skip_first_scene: document.getElementById('skipFirstScene').checked
         }
     };
 
@@ -2330,3 +2344,57 @@ document.addEventListener('keydown', (e) => {
         closeSettings();
     }
 });
+
+// ===== 生成最终视频 =====
+async function generateFinalVideo() {
+    const btn = document.getElementById('generateFinalVideoBtn');
+    const link = document.getElementById('finalVideoLink');
+    const lang = document.getElementById('finalVideoLang').value;
+
+    if (!currentProjectName) {
+        showToast('请先加载一个项目', 'error');
+        return;
+    }
+
+    // 确认操作
+    const langText = lang === 'cn' ? '中文' : '英文';
+    if (!confirm(`确定要生成最终视频吗？\n\n将使用 ${langText} 配音合成视频。\n\n此操作可能需要较长时间，请耐心等待。`)) {
+        return;
+    }
+
+    // 更新 UI 状态
+    btn.disabled = true;
+    btn.innerHTML = '<span class="btn-icon">⏳</span> 生成中...';
+    link.style.display = 'none';
+    updateProgress('🎬 正在生成最终视频，请稍候...');
+
+    try {
+        const response = await fetch('/api/generate/final-video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lang: lang })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message, 'success');
+            updateProgress(`✅ ${result.message}`);
+
+            // 显示下载链接
+            link.href = result.video_path;
+            link.textContent = `📥 下载最终视频 (${result.file_size_mb} MB)`;
+            link.style.display = 'inline-block';
+
+        } else {
+            showToast('生成失败: ' + result.error, 'error');
+            updateProgress('❌ 生成失败: ' + result.error);
+        }
+    } catch (error) {
+        showToast('网络错误: ' + error.message, 'error');
+        updateProgress('❌ 网络错误: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="btn-icon">🎞️</span> 生成最终视频';
+    }
+}

@@ -46,6 +46,12 @@ class Config:
                 "image": 2,
                 "video": 1
             }
+        },
+        "video_post_processing": {
+            "scene_threshold": 27.0,      # 场景检测阈值（值越大检测越宽松）
+            "video_volume": 0.05,         # 原视频音量 (0.05 = 5%)
+            "audio_volume": 4.0,          # 配音音量 (4.0 = 400%)
+            "skip_first_scene": True      # 是否删除第一个镜头
         }
     }
     

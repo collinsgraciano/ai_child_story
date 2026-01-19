@@ -14,6 +14,7 @@ from flask_cors import CORS
 from image_generator import ImageGenerator
 from video_generator import VideoGenerator
 from audio_generator import AudioGenerator
+from video_post_processor import VideoPostProcessor
 from config_manager import config
 
 app = Flask(__name__, static_folder='static')
@@ -1295,6 +1296,102 @@ def generate_all_images():
         "pages": results,
         "message": "请逐个点击生成，或使用批量生成功能"
     })
+
+
+@app.route('/api/generate/final-video', methods=['POST'])
+def generate_final_video():
+    """生成最终合成视频（删除第一个镜头 + 配音对齐 + 拼接）"""
+    if story_data is None:
+        return jsonify({"success": False, "error": "故事数据未加载"})
+    
+    if not current_project_dir:
+        return jsonify({"success": False, "error": "未初始化项目目录"})
+    
+    # 获取请求参数或使用配置默认值
+    data = request.get_json() or {}
+    
+    # 从配置读取后处理参数
+    post_config = config.to_dict().get("video_post_processing", {})
+    
+    scene_threshold = data.get("scene_threshold") or post_config.get("scene_threshold", 27.0)
+    video_volume = data.get("video_volume") or post_config.get("video_volume", 0.05)
+    audio_volume = data.get("audio_volume") or post_config.get("audio_volume", 4.0)
+    skip_first_scene = data.get("skip_first_scene", post_config.get("skip_first_scene", True))
+    
+    # 语言选择：cn 或 en
+    lang = data.get("lang", "cn")
+    
+    video_folder = os.path.join(current_project_dir, "videos")
+    audio_folder = os.path.join(current_project_dir, "audio")
+    temp_folder = os.path.join(current_project_dir, "temp_merge")
+    final_output = os.path.join(current_project_dir, f"{current_project_name}_final.mp4")
+    
+    # 检查视频文件夹
+    if not os.path.exists(video_folder) or not os.listdir(video_folder):
+        return jsonify({"success": False, "error": "没有找到视频文件，请先生成视频"})
+    
+    # 检查音频文件夹
+    if not os.path.exists(audio_folder) or not os.listdir(audio_folder):
+        return jsonify({"success": False, "error": "没有找到音频文件，请先生成配音"})
+    
+    try:
+        print(f"🎬 开始生成最终视频...")
+        print(f"   视频目录: {video_folder}")
+        print(f"   音频目录: {audio_folder}")
+        print(f"   输出路径: {final_output}")
+        print(f"   参数: threshold={scene_threshold}, video_vol={video_volume}, audio_vol={audio_volume}")
+        
+        # 重命名音频文件以匹配视频文件名（处理 _cn/_en 后缀）
+        # 视频格式: page_001.mp4
+        # 音频格式: page_001_cn.wav 或 page_001_en.wav
+        # 需要创建临时目录，复制并重命名音频文件
+        
+        audio_temp_folder = os.path.join(temp_folder, "audio_matched")
+        os.makedirs(audio_temp_folder, exist_ok=True)
+        
+        # 复制并重命名音频文件
+        audio_suffix = "_cn" if lang == "cn" else "_en"
+        for audio_file in os.listdir(audio_folder):
+            if audio_suffix in audio_file:
+                # page_001_cn.wav -> page_001.wav
+                new_name = audio_file.replace(audio_suffix, "")
+                shutil.copy2(
+                    os.path.join(audio_folder, audio_file),
+                    os.path.join(audio_temp_folder, new_name)
+                )
+        
+        # 初始化后处理器
+        processor = VideoPostProcessor(
+            video_folder=video_folder,
+            audio_folder=audio_temp_folder,
+            output_folder=temp_folder,
+            final_output_path=final_output,
+            threshold=float(scene_threshold),
+            video_volume=float(video_volume),
+            audio_volume=float(audio_volume)
+        )
+        
+        # 执行处理
+        result_path = processor.process(force_trim=skip_first_scene, cleanup=True)
+        
+        if result_path and os.path.exists(result_path):
+            # 获取文件大小
+            file_size = os.path.getsize(result_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            return jsonify({
+                "success": True,
+                "video_path": f"/output/{current_project_name}/{current_project_name}_final.mp4",
+                "file_size_mb": round(file_size_mb, 2),
+                "message": f"最终视频生成成功! 大小: {file_size_mb:.2f} MB"
+            })
+        else:
+            return jsonify({"success": False, "error": "视频处理失败，请检查日志"})
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"生成失败: {str(e)}"})
 
 
 if __name__ == '__main__':
