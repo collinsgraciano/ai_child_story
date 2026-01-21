@@ -30,6 +30,13 @@ class ImageGenerator:
         
         # 确保输出目录存在
         os.makedirs(os.path.join(self._output_dir, "images"), exist_ok=True)
+
+    def update_config(self, api_key: str, base_url: str, model: str = None):
+        """更新配置"""
+        self.api_key = api_key
+        self.base_url = base_url.rstrip('/')
+        if model:
+            self.model = model
     
     @property
     def output_dir(self):

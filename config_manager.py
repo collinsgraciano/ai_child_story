@@ -26,7 +26,8 @@ class Config:
         },
         "audio_api": {
             "base_url": "https://11111.gradio.live",
-            "reference_audio": "d:\\gemini\\child_story\\10s.mp3"
+            "reference_audio_cn": "d:\\gemini\\child_story\\10s.mp3",
+            "reference_audio_en": "d:\\gemini\\child_story\\10s.mp3"
         },
         "optimize_api": {
             "base_url": "https://x666.me/v1",
@@ -178,11 +179,12 @@ class Config:
         }
         self.save_config()
     
-    def update_audio_api(self, base_url: str, reference_audio: str):
+    def update_audio_api(self, base_url: str, reference_audio_cn: str, reference_audio_en: str):
         """更新音频 API 配置"""
         self.config["audio_api"] = {
             "base_url": base_url,
-            "reference_audio": reference_audio
+            "reference_audio_cn": reference_audio_cn,
+            "reference_audio_en": reference_audio_en
         }
         self.save_config()
     

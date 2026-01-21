@@ -36,7 +36,7 @@ video_gen = VideoGenerator(
 
 audio_gen = AudioGenerator(
     api_url=config.get("audio_api", "base_url") or "",
-    default_ref_audio=config.get("audio_api", "reference_audio")
+    default_ref_audio=config.get("audio_api", "reference_audio_cn")
 )
 
 # 全局状态
@@ -215,12 +215,11 @@ def update_config():
                 model=img_cfg.get("model", config.get("image_api", "model"))
             )
             # 更新生成器
-            image_gen.client = None  # 重新初始化
-            image_gen.__init__(
+            image_gen.update_config(
                 api_key=config.get("image_api", "api_key"),
-                base_url=config.get("image_api", "base_url")
+                base_url=config.get("image_api", "base_url"),
+                model=config.get("image_api", "model")
             )
-            image_gen.model = config.get("image_api", "model")
         
         # 更新视频 API 配置
         if "video_api" in data:
@@ -242,12 +241,13 @@ def update_config():
             audio_cfg = data["audio_api"]
             config.update_audio_api(
                 base_url=audio_cfg.get("base_url", config.get("audio_api", "base_url")),
-                reference_audio=audio_cfg.get("reference_audio", config.get("audio_api", "reference_audio"))
+                reference_audio_cn=audio_cfg.get("reference_audio_cn", config.get("audio_api", "reference_audio_cn")),
+                reference_audio_en=audio_cfg.get("reference_audio_en", config.get("audio_api", "reference_audio_en"))
             )
-            # 更新生成器
+            # 更新生成器 (使用中文作为默认)
             audio_gen.update_config(
                 api_url=config.get("audio_api", "base_url"),
-                default_ref_audio=config.get("audio_api", "reference_audio")
+                default_ref_audio=config.get("audio_api", "reference_audio_cn")
             )
         
         # 更新优化 API 配置
@@ -269,6 +269,19 @@ def update_config():
         if "generation" in data:
             for key, value in data["generation"].items():
                 config.set("generation", key, value=value)
+        
+        # [FIX] 更新视频后处理配置
+        if "video_post_processing" in data:
+            vpp_cfg = data["video_post_processing"]
+            current_vpp = config.config.get("video_post_processing", {})
+            current_vpp.update({
+                "scene_threshold": vpp_cfg.get("scene_threshold", current_vpp.get("scene_threshold", 27.0)),
+                "video_volume": vpp_cfg.get("video_volume", current_vpp.get("video_volume", 0.05)),
+                "audio_volume": vpp_cfg.get("audio_volume", current_vpp.get("audio_volume", 4.0)),
+                "skip_first_scene": vpp_cfg.get("skip_first_scene", current_vpp.get("skip_first_scene", True))
+            })
+            config.config["video_post_processing"] = current_vpp
+            config.save_config()
         
         return jsonify({
             "success": True,
@@ -963,17 +976,16 @@ def generate_page_image(page_index):
     if page is None:
         return jsonify({"success": False, "error": f"页面 {page_index} 不存在"})
     
-    # 收集参考图片（优先级：设计稿 > 前面的分镜）
-    # 限制总数不超过 10 张
-    MAX_REF_IMAGES = 10
+    # 收集参考图片：场景设计稿 + 角色设计稿 + 前一张图片
     ref_images = []
     
-    # 1. 必传：角色设计稿和场景设计稿
+    # 1. 角色设计稿
     char_sheet = image_gen.get_character_sheet_path()
-    scene_sheet = image_gen.get_scene_sheet_path()
-    
     if os.path.exists(char_sheet):
         ref_images.append(char_sheet)
+    
+    # 2. 场景设计稿
+    scene_sheet = image_gen.get_scene_sheet_path()
     if os.path.exists(scene_sheet):
         ref_images.append(scene_sheet)
     
@@ -983,20 +995,13 @@ def generate_page_image(page_index):
             "error": "请先生成角色设计稿和场景设计稿"
         })
     
-    # 2. 添加前面已生成的分镜图片（倒序添加，优先近的）
-    remaining_slots = MAX_REF_IMAGES - len(ref_images)
-    if remaining_slots > 0:
-        prev_pages = []
-        for i in range(page_index - 1, 0, -1):  # 从前一页开始倒序
-            prev_img_path = image_gen.get_page_image_path(i)
-            if os.path.exists(prev_img_path):
-                prev_pages.append(prev_img_path)
-                if len(prev_pages) >= remaining_slots:
-                    break
-        # 按正序添加（让较早的图片在前面）
-        ref_images.extend(reversed(prev_pages))
+    # 3. 前一张分镜图片（仅一张）
+    if page_index > 1:
+        prev_img_path = image_gen.get_page_image_path(page_index - 1)
+        if os.path.exists(prev_img_path):
+            ref_images.append(prev_img_path)
     
-    print(f"📚 第 {page_index} 页参考图片: {len(ref_images)} 张")    # 参考图收集完毕
+    print(f"📚 第 {page_index} 页参考图片: {len(ref_images)} 张 (角色+场景+前一张)")    # 参考图收集完毕
     
     # 获取生成配置
     batch_size = config.get("generation", "batch_size") or 1
@@ -1180,11 +1185,15 @@ def generate_page_audio(page_index):
              active_audio_tasks -= 1
              return jsonify({"success": False, "error": f"{lang} 旁白为空"})
 
+        # 根据语言选择参考音频
+        ref_audio_key = "reference_audio_en" if lang == "en" else "reference_audio_cn"
+        ref_audio_path = config.get("audio_api", ref_audio_key)
+        
         # 生成
         result = audio_gen.generate_audio(
             text=text,
             output_path=audio_path,
-            ref_audio_path=config.get("audio_api", "reference_audio"),
+            ref_audio_path=ref_audio_path,
             lang=lang
         )
         
@@ -1298,6 +1307,43 @@ def generate_all_images():
     })
 
 
+@app.route('/api/final-videos', methods=['GET'])
+def get_final_videos():
+    """获取已生成的最终视频信息"""
+    if not current_project_dir or not current_project_name:
+        return jsonify({"success": False, "error": "未加载项目"})
+    
+    videos = {}
+    
+    # 检查中文版
+    cn_path = os.path.join(current_project_dir, f"{current_project_name}_final_cn.mp4")
+    if os.path.exists(cn_path):
+        file_size = os.path.getsize(cn_path)
+        videos["cn"] = {
+            "path": f"/output/{current_project_name}/{current_project_name}_final_cn.mp4",
+            "file_size_mb": round(file_size / (1024 * 1024), 2),
+            "exists": True
+        }
+    else:
+        videos["cn"] = {"exists": False}
+    
+    # 检查英文版
+    en_path = os.path.join(current_project_dir, f"{current_project_name}_final_en.mp4")
+    if os.path.exists(en_path):
+        file_size = os.path.getsize(en_path)
+        videos["en"] = {
+            "path": f"/output/{current_project_name}/{current_project_name}_final_en.mp4",
+            "file_size_mb": round(file_size / (1024 * 1024), 2),
+            "exists": True
+        }
+    else:
+        videos["en"] = {"exists": False}
+    
+    return jsonify({
+        "success": True,
+        "videos": videos
+    })
+
 @app.route('/api/generate/final-video', methods=['POST'])
 def generate_final_video():
     """生成最终合成视频（删除第一个镜头 + 配音对齐 + 拼接）"""
@@ -1320,11 +1366,14 @@ def generate_final_video():
     
     # 语言选择：cn 或 en
     lang = data.get("lang", "cn")
+    lang_suffix = "_cn" if lang == "cn" else "_en"
     
     video_folder = os.path.join(current_project_dir, "videos")
     audio_folder = os.path.join(current_project_dir, "audio")
     temp_folder = os.path.join(current_project_dir, "temp_merge")
-    final_output = os.path.join(current_project_dir, f"{current_project_name}_final.mp4")
+    # [修改] 文件名包含语言后缀
+    final_filename = f"{current_project_name}_final{lang_suffix}.mp4"
+    final_output = os.path.join(current_project_dir, final_filename)
     
     # 检查视频文件夹
     if not os.path.exists(video_folder) or not os.listdir(video_folder):
@@ -1335,7 +1384,7 @@ def generate_final_video():
         return jsonify({"success": False, "error": "没有找到音频文件，请先生成配音"})
     
     try:
-        print(f"🎬 开始生成最终视频...")
+        print(f"🎬 开始生成最终视频 ({lang})...")
         print(f"   视频目录: {video_folder}")
         print(f"   音频目录: {audio_folder}")
         print(f"   输出路径: {final_output}")
@@ -1379,11 +1428,14 @@ def generate_final_video():
             file_size = os.path.getsize(result_path)
             file_size_mb = file_size / (1024 * 1024)
             
+            lang_text = "中文" if lang == "cn" else "英文"
+            
             return jsonify({
                 "success": True,
-                "video_path": f"/output/{current_project_name}/{current_project_name}_final.mp4",
+                "video_path": f"/output/{current_project_name}/{final_filename}",
                 "file_size_mb": round(file_size_mb, 2),
-                "message": f"最终视频生成成功! 大小: {file_size_mb:.2f} MB"
+                "lang": lang,
+                "message": f"{lang_text}版最终视频生成成功! 大小: {file_size_mb:.2f} MB"
             })
         else:
             return jsonify({"success": False, "error": "视频处理失败，请检查日志"})

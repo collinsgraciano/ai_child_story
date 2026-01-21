@@ -184,12 +184,14 @@ class VideoPostProcessor:
                 shutil.copy2(input_path, output_path)
                 return True
             
-            # 使用 ffmpeg 剪辑 (比 MoviePy 更快更稳定)
+            # 使用重新编码剪辑，确保关键帧对齐，避免拼接时卡顿
+            # -ss 放在 -i 前面可以更快地定位
             cmd = [
                 "ffmpeg", "-y",
-                "-i", str(input_path),
                 "-ss", str(first_scene_end_time),
-                "-c", "copy",  # 无损复制，速度快
+                "-i", str(input_path),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                "-c:a", "aac", "-b:a", "192k",
                 str(output_path)
             ]
             
@@ -401,12 +403,15 @@ class VideoPostProcessor:
         # 先输出到临时路径 (避免中文路径问题)
         tmp_output_path = self.output_folder / "final_merged.mp4"
         
+        # 使用重新编码而非流复制，确保关键帧对齐，避免片段切换时卡顿
         concat_cmd = [
             "ffmpeg", "-y",
             "-f", "concat",
             "-safe", "0",
             "-i", str(list_file_path),
-            "-c", "copy",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",  # 优化网页播放
             str(tmp_output_path)
         ]
         
