@@ -324,9 +324,6 @@
                 <div class="section-header">
                     <h2 class="section-title">🎬 分镜画面</h2>
                     <div class="section-actions">
-                        <button class="btn btn-primary" onclick="generateAllImages()" id="generateAllBtn">
-                            <span class="btn-icon">🚀</span> <span id="generateAllText">一键生成所有</span>
-                        </button>
                         <button class="btn btn-secondary" onclick="generateAllImages()">
                             <span class="btn-icon">📦</span> 批量生成分镜
                         </button>
@@ -348,15 +345,17 @@
                     </div>
                 </div>
 
-                <div class="section-actions" style="margin-bottom: 20px; justify-content: flex-end;">
-                    <button class="btn btn-primary" onclick="generateAllImagesAndVideos()" style="width: auto;">
-                        <span class="btn-icon">🚀</span> 全流程生成 (图+视)
-                    </button>
+                <div class="pages-grid" id="pagesGrid">
+                    <!-- 页面卡片将由 JS 动态生成 -->
+                    <div class="loading-placeholder">
+                        <div class="spinner"></div>
+                        <p>加载故事数据中...</p>
+                    </div>
                 </div>
 
                 <!-- 最终视频生成与预览区域 -->
                 <div class="final-video-section"
-                    style="margin-bottom: 20px; padding: 20px; background: rgba(99,102,241,0.1); border-radius: 12px;">
+                    style="margin-top: 30px; padding: 20px; background: rgba(99,102,241,0.1); border-radius: 12px;">
                     <h3 style="margin: 0 0 15px 0; font-size: 16px;">🎬 最终视频</h3>
 
                     <!-- 生成按钮区 -->
@@ -417,52 +416,43 @@
                         </div>
                     </div>
                 </div>
-    </div>
+            </section>
+        </main>
 
-    <div class="pages-grid" id="pagesGrid">
-        <!-- 页面卡片将由 JS 动态生成 -->
-        <div class="loading-placeholder">
-            <div class="spinner"></div>
-            <p>加载故事数据中...</p>
-        </div>
-    </div>
-    </section>
-    </main>
-
-    <!-- 底部状态栏 -->
-    <footer class="footer">
-        <div class="progress-info">
-            <span id="progressText">就绪</span>
-        </div>
-    </footer>
+        <!-- 底部状态栏 -->
+        <footer class="footer">
+            <div class="progress-info">
+                <span id="progressText">就绪</span>
+            </div>
+        </footer>
 
 
 
-    <!-- 图片预览模态框 -->
-    <div class="modal" id="imageModal">
-        <div class="modal-content">
-            <span class="close-btn" onclick="closeModal()">&times;</span>
-            <img id="modalImage" src="" alt="预览">
-            <div class="modal-actions">
-                <button class="btn btn-danger" onclick="regenerateCurrentImage()">
-                    <span class="btn-icon">🔄</span> 重新生成
-                </button>
+        <!-- 图片预览模态框 -->
+        <div class="modal" id="imageModal">
+            <div class="modal-content">
+                <span class="close-btn" onclick="closeModal()">&times;</span>
+                <img id="modalImage" src="" alt="预览">
+                <div class="modal-actions">
+                    <button class="btn btn-danger" onclick="regenerateCurrentImage()">
+                        <span class="btn-icon">🔄</span> 重新生成
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- 视频预览模态框 -->
-    <div class="modal" id="videoModal">
-        <div class="modal-content">
-            <span class="close-btn" onclick="closeVideoModal()">&times;</span>
-            <video id="modalVideo" controls></video>
-            <div class="modal-actions">
-                <button class="btn btn-danger" onclick="regenerateCurrentVideo()">
-                    <span class="btn-icon">🔄</span> 重新生成
-                </button>
+        <!-- 视频预览模态框 -->
+        <div class="modal" id="videoModal">
+            <div class="modal-content">
+                <span class="close-btn" onclick="closeVideoModal()">&times;</span>
+                <video id="modalVideo" controls></video>
+                <div class="modal-actions">
+                    <button class="btn btn-danger" onclick="regenerateCurrentVideo()">
+                        <span class="btn-icon">🔄</span> 重新生成
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
     </div>
 
     <script src="/static/app.js"></script>
