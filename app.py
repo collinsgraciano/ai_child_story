@@ -12,6 +12,7 @@ import glob
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from image_generator import ImageGenerator
+from image_generator_v2 import ImageGeneratorV2
 from video_generator import VideoGenerator
 from audio_generator import AudioGenerator
 from video_post_processor import VideoPostProcessor
@@ -20,13 +21,27 @@ from config_manager import config
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
-# 初始化生成器（使用配置）
+# 初始化生成器 V1（使用配置）
 image_gen = ImageGenerator(
     api_key=config.get("image_api", "api_key"),
     base_url=config.get("image_api", "base_url")
 )
 image_gen.model = config.get("image_api", "model")
 image_gen.max_retries = config.get("generation", "image_max_retries") or 3
+
+# 初始化生成器 V2（流式响应版）
+image_gen_v2 = ImageGeneratorV2(
+    api_key=config.get("image_api_v2", "api_key") or "",
+    base_url=config.get("image_api_v2", "base_url") or "",
+    model=config.get("image_api_v2", "model") or "gemini-3-pro-image-16-9",
+    image_size=config.get("image_api_v2", "image_size") or ""
+)
+image_gen_v2.max_retries = config.get("generation", "image_max_retries") or 3
+
+def get_active_image_gen():
+    """根据配置返回当前激活的图片生成器"""
+    mode = config.get("generation", "image_generator_mode") or "v1"
+    return image_gen_v2 if mode == "v2" else image_gen
 
 video_gen = VideoGenerator(
     api_key=config.get("video_api", "api_key"),
@@ -124,8 +139,9 @@ def init_project_from_story():
     os.makedirs(os.path.join(current_project_dir, "videos"), exist_ok=True)
     os.makedirs(os.path.join(current_project_dir, "audio"), exist_ok=True)
     
-    # 更新生成器输出目录
+    # 更新生成器输出目录 (两个生成器都更新)
     image_gen.output_dir = current_project_dir
+    image_gen_v2.output_dir = current_project_dir
     video_gen.output_dir = os.path.join(current_project_dir, "videos")
     
     # 初始化每一页的状态
@@ -219,6 +235,26 @@ def update_config():
                 api_key=config.get("image_api", "api_key"),
                 base_url=config.get("image_api", "base_url"),
                 model=config.get("image_api", "model")
+            )
+        
+        # [NEW] 更新图片 API V2 配置
+        if "image_api_v2" in data:
+            v2_cfg = data["image_api_v2"]
+            current_v2 = config.config.get("image_api_v2", {})
+            current_v2.update({
+                "base_url": v2_cfg.get("base_url", current_v2.get("base_url", "")),
+                "api_key": v2_cfg.get("api_key", current_v2.get("api_key", "")),
+                "model": v2_cfg.get("model", current_v2.get("model", "")),
+                "image_size": v2_cfg.get("image_size", current_v2.get("image_size", ""))
+            })
+            config.config["image_api_v2"] = current_v2
+            config.save_config()
+            # 更新 V2 生成器
+            image_gen_v2.update_config(
+                api_key=current_v2.get("api_key", ""),
+                base_url=current_v2.get("base_url", ""),
+                model=current_v2.get("model"),
+                image_size=current_v2.get("image_size")
             )
         
         # 更新视频 API 配置
@@ -897,9 +933,9 @@ def generate_character_sheet():
                 break
     
     if ref_images:
-        result = image_gen.generate_with_reference(prompt, ref_images, "character_sheet")
+        result = get_active_image_gen().generate_with_reference(prompt, ref_images, "character_sheet")
     else:
-        result = image_gen.generate_text_to_image(prompt, "character_sheet")
+        result = get_active_image_gen().generate_text_to_image(prompt, "character_sheet")
     
     if result["success"]:
         generation_status["character_sheet"] = "completed"
@@ -939,11 +975,11 @@ def generate_scene_sheet():
                 break
     
     # 2. 角色设计稿
-    char_sheet_path = image_gen.get_character_sheet_path()
+    char_sheet_path = get_active_image_gen().get_character_sheet_path()
     if os.path.exists(char_sheet_path):
         ref_images.append(char_sheet_path)
     
-    result = image_gen.generate_with_reference(prompt, ref_images, "scene_sheet")
+    result = get_active_image_gen().generate_with_reference(prompt, ref_images, "scene_sheet")
     
     if result["success"]:
         generation_status["scene_sheet"] = "completed"
@@ -980,12 +1016,12 @@ def generate_page_image(page_index):
     ref_images = []
     
     # 1. 角色设计稿
-    char_sheet = image_gen.get_character_sheet_path()
+    char_sheet = get_active_image_gen().get_character_sheet_path()
     if os.path.exists(char_sheet):
         ref_images.append(char_sheet)
     
     # 2. 场景设计稿
-    scene_sheet = image_gen.get_scene_sheet_path()
+    scene_sheet = get_active_image_gen().get_scene_sheet_path()
     if os.path.exists(scene_sheet):
         ref_images.append(scene_sheet)
     
@@ -997,7 +1033,7 @@ def generate_page_image(page_index):
     
     # 3. 前一张分镜图片（仅一张）
     if page_index > 1:
-        prev_img_path = image_gen.get_page_image_path(page_index - 1)
+        prev_img_path = get_active_image_gen().get_page_image_path(page_index - 1)
         if os.path.exists(prev_img_path):
             ref_images.append(prev_img_path)
     
@@ -1036,7 +1072,7 @@ def generate_page_image(page_index):
             
             print(f"🔄 正在生成第 {page_index} 页 ({i+1}/{batch_size})... -> {filename}")
             
-            result = image_gen.generate_with_reference(page["image_prompt"], ref_images, filename)
+            result = get_active_image_gen().generate_with_reference(page["image_prompt"], ref_images, filename)
             
             if result["success"]:
                 success_count += 1
@@ -1458,4 +1494,4 @@ if __name__ == '__main__':
     print("=" * 50)
     print("启动服务器: http://localhost:5000")
     print("=" * 50)
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

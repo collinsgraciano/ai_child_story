@@ -19,6 +19,12 @@ class Config:
             "api_key": "sk-dummy",
             "model": "g3-img-pro"
         },
+        "image_api_v2": {
+            "base_url": "http://127.0.0.1:8045/v1",
+            "api_key": "sk-dummy",
+            "model": "gemini-3-pro-image-16-9",
+            "image_size": "4096x4096"
+        },
         "video_api": {
             "base_url": "http://127.0.0.1:8003/v1",
             "api_key": "sk-dummy",
@@ -42,7 +48,8 @@ class Config:
             "video_max_retries": 10,
             "download_timeout": 120,
             "batch_size": 1,
-            "default_style": "",  # [NEW] 默认风格名称
+            "default_style": "",
+            "image_generator_mode": "v1",  # 图片生成器: "v1" 或 "v2"
             "concurrency": {
                 "image": 2,
                 "video": 1

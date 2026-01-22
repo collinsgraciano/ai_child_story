@@ -373,11 +373,20 @@ class TaskQueue {
 function populateSettingsForm() {
     if (!currentConfig) return;
 
-    // 图片 API
+    // 图片 API V1
     document.getElementById('imageApiUrl').value = currentConfig.image_api?.base_url || '';
     document.getElementById('imageApiKey').value = currentConfig.image_api?.api_key || '';
-    document.getElementById('imageModel').value = currentConfig.image_api.model;
+    document.getElementById('imageModel').value = currentConfig.image_api?.model || '';
 
+    // 图片 API V2
+    if (currentConfig.image_api_v2) {
+        document.getElementById('imageApiUrlV2').value = currentConfig.image_api_v2.base_url || '';
+        document.getElementById('imageApiKeyV2').value = currentConfig.image_api_v2.api_key || '';
+        document.getElementById('imageModelV2').value = currentConfig.image_api_v2.model || '';
+        document.getElementById('imageSizeV2').value = currentConfig.image_api_v2.image_size || '';
+    }
+
+    // 视频 API
     document.getElementById('videoApiUrl').value = currentConfig.video_api.base_url;
     document.getElementById('videoApiKey').value = currentConfig.video_api.api_key;
     document.getElementById('videoModel').value = currentConfig.video_api.model;
@@ -397,6 +406,9 @@ function populateSettingsForm() {
         document.getElementById('imagePromptTemplate').value = currentConfig.optimize_api.image_prompt_template || '';
         document.getElementById('videoPromptTemplate').value = currentConfig.optimize_api.video_prompt_template || '';
     }
+
+    // 图片生成器模式
+    document.getElementById('imageGeneratorMode').value = currentConfig.generation?.image_generator_mode || 'v1';
 
     // 默认值处理
     document.getElementById('batchSize').value = currentConfig.generation.batch_size || 1;
@@ -450,6 +462,12 @@ async function saveSettings(silent = false) {
             api_key: document.getElementById('imageApiKey').value.trim(),
             model: document.getElementById('imageModel').value.trim()
         },
+        image_api_v2: {
+            base_url: document.getElementById('imageApiUrlV2').value.trim(),
+            api_key: document.getElementById('imageApiKeyV2').value.trim(),
+            model: document.getElementById('imageModelV2').value.trim(),
+            image_size: document.getElementById('imageSizeV2').value.trim()
+        },
         video_api: {
             base_url: document.getElementById('videoApiUrl').value.trim(),
             api_key: document.getElementById('videoApiKey').value.trim(),
@@ -471,7 +489,8 @@ async function saveSettings(silent = false) {
             batch_size: parseInt(document.getElementById('batchSize').value) || 1,
             image_max_retries: parseInt(document.getElementById('imageMaxRetries').value) ?? 3,
             video_max_retries: parseInt(document.getElementById('videoMaxRetries').value) ?? 10,
-            default_style: document.getElementById('defaultStyle').value || '',  // [NEW]
+            default_style: document.getElementById('defaultStyle').value || '',
+            image_generator_mode: document.getElementById('imageGeneratorMode').value || 'v1',
             concurrency: {
                 image: parseInt(document.getElementById('concurrencyImage').value) || 2,
                 video: parseInt(document.getElementById('concurrencyVideo').value) || 1

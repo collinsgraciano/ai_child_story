@@ -19,9 +19,9 @@
         <!-- 设置面板 (伸缩展开，可滚动) -->
         <div id="settingsPanel" class="settings-panel">
             <div class="settings-grid">
-                <!-- 图片 API 设置 -->
+                <!-- 图片 API 设置 (V1) -->
                 <div class="settings-column">
-                    <h3>🖼️ 图片生成 API</h3>
+                    <h3>🖼️ 图片生成 API (V1)</h3>
                     <div class="form-group">
                         <label for="imageApiUrl">API 地址</label>
                         <input type="text" id="imageApiUrl" placeholder="http://example.com/v1">
@@ -33,6 +33,29 @@
                     <div class="form-group">
                         <label for="imageModel">模型名称</label>
                         <input type="text" id="imageModel" placeholder="g3-img-pro">
+                    </div>
+                </div>
+
+                <!-- 图片 API 设置 (V2 流式) -->
+                <div class="settings-column">
+                    <h3>🖼️ 图片生成 API (V2 流式)</h3>
+                    <div class="form-group">
+                        <label for="imageApiUrlV2">API 地址</label>
+                        <input type="text" id="imageApiUrlV2" placeholder="http://127.0.0.1:8045/v1">
+                    </div>
+                    <div class="form-group">
+                        <label for="imageApiKeyV2">API 密钥</label>
+                        <input type="password" id="imageApiKeyV2" placeholder="sk-xxx">
+                    </div>
+                    <div class="form-group">
+                        <label for="imageModelV2">模型名称</label>
+                        <input type="text" id="imageModelV2" placeholder="gemini-3-pro-image-16-9">
+                    </div>
+                    <div class="form-group">
+                        <label for="imageSizeV2">图片尺寸</label>
+                        <input type="text" id="imageSizeV2" placeholder="4096x4096">
+                        <small style="color: var(--text-secondary); display: block; margin-top: 4px;">如 1024x1024,
+                            4096x4096 等</small>
                     </div>
                 </div>
 
@@ -104,6 +127,15 @@
                 <!-- 生成配置 -->
                 <div class="settings-column">
                     <h3>⚙️ 生成配置</h3>
+                    <div class="form-group">
+                        <label for="imageGeneratorMode">图片生成器</label>
+                        <select id="imageGeneratorMode" style="width: 100%;">
+                            <option value="v1">V1 (标准)</option>
+                            <option value="v2">V2 (流式响应)</option>
+                        </select>
+                        <small style="color: var(--text-secondary); display: block; margin-top: 4px;">V1: 标准 API; V2: 流式
+                            chat.completions</small>
+                    </div>
                     <div class="form-group">
                         <label for="batchSize">每次生成数量</label>
                         <input type="number" id="batchSize" min="1" max="5" value="1" placeholder="默认: 1">
