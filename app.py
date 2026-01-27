@@ -67,6 +67,7 @@ os.makedirs(STYLES_DIR, exist_ok=True)
 generation_status = {
     "character_sheet": None,
     "scene_sheet": None,
+    "item_sheet": None,
     "current_project": None,
     "pages": {},  # {page_index: {"image": status, "video": status, "audio": status, "selected": bool}}
     "srt": None   # None, "generating", "completed", "failed"
@@ -115,6 +116,7 @@ def reset_generation_status():
     generation_status = {
         "character_sheet": None,
         "scene_sheet": None,
+        "item_sheet": None,
         "current_project": None,
         "pages": {},
         "srt": None
@@ -643,6 +645,7 @@ def get_story():
             "story_insight": story_data.get("story_insight", ""),
             "character_sheet_prompt": story_data.get("character_sheet_prompt", ""),
             "scene_sheet_prompt": story_data.get("scene_sheet_prompt", ""),
+            "item_sheet_prompt": story_data.get("item_sheet_prompt", ""),
             "cover_image_prompt": story_data.get("cover_image_prompt", ""),
             "script": story_data.get("script", [])
         }
@@ -877,6 +880,10 @@ def get_status():
     if os.path.exists(image_gen.get_scene_sheet_path()):
         if generation_status["scene_sheet"] != "generating":
             generation_status["scene_sheet"] = "completed"
+
+    if os.path.exists(os.path.join(image_gen.output_dir, "item_sheet.png")):
+        if generation_status["item_sheet"] != "generating":
+            generation_status["item_sheet"] = "completed"
     
     # 检查每页图片
     for idx in generation_status["pages"]:
@@ -899,13 +906,18 @@ def get_status():
     if current_project_name and os.path.exists(image_gen.get_scene_sheet_path()):
         scene_path = f"/output/{current_project_name}/scene_sheet.png"
     
+    item_path = None
+    if current_project_name and os.path.exists(os.path.join(image_gen.output_dir, "item_sheet.png")):
+        item_path = f"/output/{current_project_name}/item_sheet.png"
+    
     return jsonify({
         "success": True,
         "status": generation_status,
         "project_name": current_project_name,
         "paths": {
             "character_sheet": char_path,
-            "scene_sheet": scene_path
+            "scene_sheet": scene_path,
+            "item_sheet": item_path
         }
     })
 
@@ -988,8 +1000,50 @@ def generate_scene_sheet():
             "path": f"/output/{current_project_name}/scene_sheet.png",
             "message": "场景设计稿生成成功" + (f" (参考风格: {current_style})" if current_style else "")
         })
+        return jsonify({
+            "success": False,
+            "error": result["error"]
+        })
+
+
+@app.route('/api/generate/item-sheet', methods=['POST'])
+def generate_item_sheet():
+    """生成物品设计稿（参考风格图 + 角色设计稿）"""
+    if story_data is None:
+        return jsonify({"success": False, "error": "故事数据未加载"})
+    
+    generation_status["item_sheet"] = "generating"
+    
+    prompt = story_data.get("item_sheet_prompt", "")
+    
+    # 参考图: 风格图 + 角色设计稿
+    ref_images = []
+    
+    # 1. 风格图
+    if current_style:
+        for f in os.listdir(STYLES_DIR):
+            if os.path.splitext(f)[0] == current_style:
+                style_path = os.path.join(STYLES_DIR, f)
+                if os.path.exists(style_path):
+                    ref_images.append(style_path)
+                break
+    
+    # 2. 角色设计稿 (可选，作为参考以保持风格一致)
+    char_sheet_path = get_active_image_gen().get_character_sheet_path()
+    if os.path.exists(char_sheet_path):
+        ref_images.append(char_sheet_path)
+    
+    result = get_active_image_gen().generate_with_reference(prompt, ref_images, "item_sheet")
+    
+    if result["success"]:
+        generation_status["item_sheet"] = "completed"
+        return jsonify({
+            "success": True,
+            "path": f"/output/{current_project_name}/item_sheet.png",
+            "message": "物品设计稿生成成功" + (f" (参考风格: {current_style})" if current_style else "")
+        })
     else:
-        generation_status["scene_sheet"] = "failed"
+        generation_status["item_sheet"] = "failed"
         return jsonify({
             "success": False,
             "error": result["error"]
@@ -1493,5 +1547,5 @@ if __name__ == '__main__':
     print(f"视频 API: {config.get('video_api', 'base_url')}")
     print("=" * 50)
     print("启动服务器: http://localhost:5000")
-    print("=" * 50)
+    print("=" * 100)
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

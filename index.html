@@ -281,9 +281,12 @@
                 </div>
 
                 <!-- 一键生成按钮 -->
-                <div style="margin-bottom: 15px;">
+                <div style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
                     <button class="btn btn-primary" onclick="generateAllSheets()" style="width: auto;">
-                        <span class="btn-icon">🚀</span> 一键生成设计稿 (角色 → 场景)
+                        <span class="btn-icon">🚀</span> 一键生成设计稿 (角色 → 场景 → 物品)
+                    </button>
+                    <button class="btn btn-secondary" onclick="generateAllSheetsAndImages()" style="width: auto;">
+                        <span class="btn-icon">📦</span> 一键生成设计稿 + 分镜图片
                     </button>
                 </div>
 
@@ -345,6 +348,36 @@
                         <div style="padding: 0 15px 15px;">
                             <button class="btn btn-primary" onclick="generateSceneSheet()" style="width: 100%;">
                                 <span class="btn-icon">✨</span> 生成场景设计稿
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 物品设计稿 -->
+                    <div class="page-card" id="itemSheet"
+                        style="background: var(--bg-card); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg);">
+                        <div class="page-header"
+                            style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: rgba(16,185,129,0.2);">
+                            <span style="font-weight: 600;">📦 物品设计稿</span>
+                            <span class="status-badge" id="itemStatus">未生成</span>
+                        </div>
+                        <div class="sheet-preview" id="itemPreview"
+                            style="min-height: 200px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.2);">
+                            <div class="placeholder" style="text-align: center; color: var(--text-secondary);">
+                                <span style="font-size: 2rem;">🎁</span>
+                                <p style="margin-top: 8px;">点击下方按钮生成</p>
+                            </div>
+                        </div>
+                        <div class="prompt-section" style="padding: 15px;">
+                            <label
+                                style="font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; display: block;">📝
+                                提示词</label>
+                            <textarea id="itemPromptInput"
+                                style="width: 100%; min-height: 80px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); padding: 10px; resize: vertical; font-size: 13px;"
+                                onchange="updateSheetPrompt('item_sheet_prompt', this.value)"></textarea>
+                        </div>
+                        <div style="padding: 0 15px 15px;">
+                            <button class="btn btn-primary" onclick="generateItemSheet()" style="width: 100%;">
+                                <span class="btn-icon">✨</span> 生成物品设计稿
                             </button>
                         </div>
                     </div>

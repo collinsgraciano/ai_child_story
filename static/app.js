@@ -12,7 +12,7 @@ let jsonInputVisible = false;  // JSON 输入区域是否可见
 
 // 图片缓存，用于避免重复刷新导致闪烁
 const loadedImages = new Map();  // {key: imagePath}
-const loadedSheets = { character: null, scene: null };
+const loadedSheets = { character: null, scene: null, item: null };
 
 // ===== 初始化 =====
 document.addEventListener('DOMContentLoaded', async () => {
@@ -246,12 +246,16 @@ function populateSheetPrompts() {
 
     const charInput = document.getElementById('characterPromptInput');
     const sceneInput = document.getElementById('scenePromptInput');
+    const itemInput = document.getElementById('itemPromptInput');
 
     if (charInput && storyData.character_sheet_prompt) {
         charInput.value = storyData.character_sheet_prompt;
     }
     if (sceneInput && storyData.scene_sheet_prompt) {
         sceneInput.value = storyData.scene_sheet_prompt;
+    }
+    if (itemInput && storyData.item_sheet_prompt) {
+        itemInput.value = storyData.item_sheet_prompt;
     }
 }
 
@@ -1632,6 +1636,9 @@ function updateStatusUI(result) {
     // 更新场景设计稿状态
     updateSheetStatus('scene', status.scene_sheet, paths.scene_sheet);
 
+    // 更新物品设计稿状态
+    updateSheetStatus('item', status.item_sheet, paths.item_sheet);
+
     // 更新每页状态
     for (const [pageIndex, pageStatus] of Object.entries(status.pages)) {
         updatePageStatus(parseInt(pageIndex), pageStatus);
@@ -2305,41 +2312,99 @@ async function generateSceneSheet() {
     }
 }
 
+// ===== 生成物品设计稿 =====
+async function generateItemSheet() {
+    const btn = document.querySelector('#itemSheet button');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-icon">⏳</span> 生成中...';
+    }
+
+    try {
+        const response = await fetch('/api/generate/item-sheet', { method: 'POST' });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message, 'success');
+            refreshStatus();
+        } else {
+            showToast('生成失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('网络错误: ' + error.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="btn-icon">✨</span> 生成物品设计稿';
+        }
+    }
+}
+
 // ===== 一键生成设计稿 (角色 → 场景) =====
-async function generateAllSheets() {
-    if (!confirm('将按顺序生成角色设计稿和场景设计稿。是否继续？')) {
+// ===== 一键生成设计稿 (角色 → 场景 → 物品) =====
+async function generateAllSheets(skipConfirm = false) {
+    if (!skipConfirm && !confirm('将按顺序生成: 角色设计稿 → 场景设计稿 → 物品设计稿。是否继续？')) {
         return;
     }
 
-    showToast('正在生成角色设计稿...', 'info');
+    showToast('🚀 正在生成角色设计稿...', 'info');
 
-    // 1. 先生成角色设计稿
     try {
+        // 1. 生成角色设计稿
         const charResponse = await fetch('/api/generate/character-sheet', { method: 'POST' });
         const charResult = await charResponse.json();
 
         if (!charResult.success) {
-            showToast('角色设计稿生成失败: ' + charResult.error, 'error');
+            showToast('❌ 角色设计稿生成失败: ' + charResult.error, 'error');
             return;
         }
-
-        showToast('角色设计稿完成，正在生成场景设计稿...', 'info');
         refreshStatus();
+        showToast('✅ 角色设计稿完成，正在生成场景设计稿...', 'info');
 
-        // 2. 再生成场景设计稿
+        // 2. 生成场景设计稿
         const sceneResponse = await fetch('/api/generate/scene-sheet', { method: 'POST' });
         const sceneResult = await sceneResponse.json();
 
-        if (sceneResult.success) {
+        if (!sceneResult.success) {
+            showToast('❌ 场景设计稿生成失败: ' + sceneResult.error, 'error');
+            return;
+        }
+        refreshStatus();
+        showToast('✅ 场景设计稿完成，正在生成物品设计稿...', 'info');
+
+        // 3. 生成物品设计稿
+        const itemResponse = await fetch('/api/generate/item-sheet', { method: 'POST' });
+        const itemResult = await itemResponse.json();
+
+        if (itemResult.success) {
             showToast('🎉 所有设计稿生成完成！', 'success');
             refreshStatus();
         } else {
-            showToast('场景设计稿生成失败: ' + sceneResult.error, 'error');
+            showToast('❌ 物品设计稿生成失败: ' + itemResult.error, 'error');
         }
 
     } catch (error) {
-        showToast('生成失败: ' + error.message, 'error');
+        showToast('❌ 生成失败: ' + error.message, 'error');
     }
+}
+
+// ===== 一键生成设计稿 + 分镜图片 =====
+async function generateAllSheetsAndImages() {
+    if (!confirm('此操作将执行以下流程：\n1. 生成所有设计稿 (角色, 场景, 物品)\n2. 批量生成所有分镜图片\n\n这可能耗时较长，是否继续？')) {
+        return;
+    }
+
+    // 1. 生成设计稿 (跳过内部确认)
+    await generateAllSheets(true);
+
+    // 2. 批量生成分镜图片 (chained 模式)
+    // 注意: generateAllSheets 是异步的，上面已经 await 了
+    // 检查设计稿是否都已存在（简单检查: loadedSheets 状态或重新检查 DOM）
+    // 稍微延迟一下确保状态刷新
+    setTimeout(() => {
+        showToast('🚀 设计稿阶段结束，开始批量生成分镜...', 'info');
+        generateAllImages(true);
+    }, 1000);
 }
 
 // ===== 点击模态框外部关闭 =====
