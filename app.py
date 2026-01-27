@@ -13,6 +13,7 @@ from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from image_generator import ImageGenerator
 from image_generator_v2 import ImageGeneratorV2
+from image_generator_flow import ImageGeneratorFlow
 from video_generator import VideoGenerator
 from audio_generator import AudioGenerator
 from video_post_processor import VideoPostProcessor
@@ -38,10 +39,22 @@ image_gen_v2 = ImageGeneratorV2(
 )
 image_gen_v2.max_retries = config.get("generation", "image_max_retries") or 3
 
+# 初始化生成器 Flow (自定义流式)
+image_gen_flow = ImageGeneratorFlow(
+    api_key=config.get("flow_api", "api_key") or "",
+    base_url=config.get("flow_api", "base_url") or "",
+    model=config.get("flow_api", "model") or "gemini-3.0-pro-image-landscape"
+)
+image_gen_flow.max_retries = config.get("generation", "image_max_retries") or 3
+
 def get_active_image_gen():
     """根据配置返回当前激活的图片生成器"""
     mode = config.get("generation", "image_generator_mode") or "v1"
-    return image_gen_v2 if mode == "v2" else image_gen
+    if mode == "v2":
+        return image_gen_v2
+    elif mode == "flow":
+        return image_gen_flow
+    return image_gen
 
 video_gen = VideoGenerator(
     api_key=config.get("video_api", "api_key"),
@@ -144,6 +157,7 @@ def init_project_from_story():
     # 更新生成器输出目录 (两个生成器都更新)
     image_gen.output_dir = current_project_dir
     image_gen_v2.output_dir = current_project_dir
+    image_gen_flow.output_dir = current_project_dir
     video_gen.output_dir = os.path.join(current_project_dir, "videos")
     
     # 初始化每一页的状态
@@ -250,6 +264,24 @@ def update_config():
                 "image_size": v2_cfg.get("image_size", current_v2.get("image_size", ""))
             })
             config.config["image_api_v2"] = current_v2
+
+        # [NEW] 更新 Flow API 配置
+        if "flow_api" in data:
+            flow_cfg = data["flow_api"]
+            current_flow = config.config.get("flow_api", {})
+            current_flow.update({
+                "base_url": flow_cfg.get("base_url", current_flow.get("base_url", "")),
+                "api_key": flow_cfg.get("api_key", current_flow.get("api_key", "")),
+                "model": flow_cfg.get("model", current_flow.get("model", ""))
+            })
+            config.config["flow_api"] = current_flow
+            
+            # 更新生成器实例
+            image_gen_flow.update_config(
+                api_key=current_flow.get("api_key"),
+                base_url=current_flow.get("base_url"),
+                model=current_flow.get("model")
+            )
             config.save_config()
             # 更新 V2 生成器
             image_gen_v2.update_config(

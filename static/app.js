@@ -411,6 +411,13 @@ function populateSettingsForm() {
         document.getElementById('videoPromptTemplate').value = currentConfig.optimize_api.video_prompt_template || '';
     }
 
+    // Flow API
+    if (currentConfig.flow_api) {
+        document.getElementById('flowApiUrl').value = currentConfig.flow_api.base_url || '';
+        document.getElementById('flowApiKey').value = currentConfig.flow_api.api_key || '';
+        document.getElementById('flowApiModel').value = currentConfig.flow_api.model || '';
+    }
+
     // 图片生成器模式
     document.getElementById('imageGeneratorMode').value = currentConfig.generation?.image_generator_mode || 'v1';
 
@@ -488,6 +495,11 @@ async function saveSettings(silent = false) {
             model: document.getElementById('optimizeModel').value.trim(),
             image_prompt_template: document.getElementById('imagePromptTemplate').value.trim(),
             video_prompt_template: document.getElementById('videoPromptTemplate').value.trim()
+        },
+        flow_api: {
+            base_url: document.getElementById('flowApiUrl').value.trim(),
+            api_key: document.getElementById('flowApiKey').value.trim(),
+            model: document.getElementById('flowApiModel').value.trim()
         },
         generation: {
             batch_size: parseInt(document.getElementById('batchSize').value) || 1,
